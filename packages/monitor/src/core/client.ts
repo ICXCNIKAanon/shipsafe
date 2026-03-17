@@ -43,12 +43,16 @@ function generateSessionId(): string {
   });
 }
 
+const SELF_ERROR_THRESHOLD = 3;
+
 export class ShipSafeClient {
   private queue: ShipSafeEvent[] = [];
   private config: ResolvedConfig;
   private sessionId: string;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
+  private _selfErrorCount: number = 0;
+  private _disabled: boolean = false;
 
   constructor(config: ShipSafeConfig) {
     this.config = {
@@ -74,6 +78,7 @@ export class ShipSafeClient {
 
   capture(event: Omit<ShipSafeEvent, 'project_id' | 'session_id' | 'timestamp' | 'environment'>): void {
     if (this.destroyed) return;
+    if (this._disabled) return;
 
     // Apply sampling
     if (event.type === 'performance') {
@@ -184,6 +189,12 @@ export class ShipSafeClient {
     if (this.config.debug) {
       console.error('[ShipSafe] Flush failed after all retries');
     }
+
+    this._selfErrorCount++;
+    if (this._selfErrorCount >= SELF_ERROR_THRESHOLD) {
+      this._disabled = true;
+      console.warn('[ShipSafe] Monitor auto-disabled after repeated errors. Events will not be captured.');
+    }
   }
 
   getSessionId(): string {
@@ -192,6 +203,18 @@ export class ShipSafeClient {
 
   getQueueLength(): number {
     return this.queue.length;
+  }
+
+  isDisabled(): boolean {
+    return this._disabled;
+  }
+
+  disable(): void {
+    this._disabled = true;
+  }
+
+  enable(): void {
+    this._disabled = false;
   }
 
   destroy(): void {

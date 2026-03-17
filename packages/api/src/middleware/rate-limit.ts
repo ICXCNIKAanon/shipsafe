@@ -25,7 +25,7 @@ export function rateLimiter(
     next: Next,
   ): Promise<Response | void> => {
     const projectId = c.get('projectId');
-    const key = projectId ?? c.req.header('x-forwarded-for') ?? 'anonymous';
+    const key = projectId ?? 'anonymous';
     const now = Date.now();
 
     let entry = limits.get(key);

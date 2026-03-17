@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { createDatabase } from './db/database.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -24,6 +25,13 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 const app = new Hono();
+
+app.use('*', cors({
+  origin: process.env.SHIPSAFE_CORS_ORIGIN ?? '*',
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Project-ID'],
+  maxAge: 86400,
+}));
 
 app.route('/v1', ingestRoutes);
 app.route('/v1', errorRoutes);

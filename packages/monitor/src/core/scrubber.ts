@@ -6,7 +6,7 @@ const patterns: Array<{ regex: RegExp; replacement: string }> = [
   // SSN (must come before phone to avoid overlap)
   { regex: /\b\d{3}-\d{2}-\d{4}\b/g, replacement: '[ssn]' },
   // Credit card numbers (13-19 digits, optionally separated by spaces or dashes)
-  { regex: /\b(?:\d[ -]*?){13,19}\b/g, replacement: '[card]' },
+  { regex: /\b\d[\d -]{12,22}\d\b/g, replacement: '[card]' },
   // Phone numbers (various formats)
   { regex: /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, replacement: '[phone]' },
   // IPv4 addresses

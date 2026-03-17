@@ -3,6 +3,17 @@ import {
   dbStoreSourceMap,
 } from '../db/sourcemap-repo.js';
 
+const MAX_BATCH_SIZE = 100;
+const MAX_SOURCE_MAP_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function isValidFilePath(p: string): boolean {
+  if (!p || typeof p !== 'string') return false;
+  if (p.includes('\0')) return false;
+  if (p.includes('..')) return false;
+  if (p.startsWith('/')) return false;
+  return true;
+}
+
 export const sourcemapRoutes = new Hono();
 
 sourcemapRoutes.post('/sourcemaps', async (c) => {
@@ -21,6 +32,14 @@ sourcemapRoutes.post('/sourcemaps', async (c) => {
 
   if (!body.project_id || !body.release || !body.file_path || !body.source_map) {
     return c.json({ error: 'Missing required fields: project_id, release, file_path, source_map' }, 400);
+  }
+
+  if (!isValidFilePath(body.file_path)) {
+    return c.json({ error: 'Invalid file_path. Must be relative and contain no traversal sequences.' }, 400);
+  }
+
+  if (body.source_map.length > MAX_SOURCE_MAP_BYTES) {
+    return c.json({ error: `Source map exceeds maximum size of ${MAX_SOURCE_MAP_BYTES} bytes.` }, 400);
   }
 
   dbStoreSourceMap(body.project_id, body.release, body.file_path, body.source_map);
@@ -52,7 +71,21 @@ sourcemapRoutes.post('/sourcemaps/batch', async (c) => {
     return c.json({ error: 'Missing required fields: project_id, release, source_maps' }, 400);
   }
 
+  if (!Array.isArray(body.source_maps)) {
+    return c.json({ error: 'source_maps must be an array.' }, 400);
+  }
+
+  if (body.source_maps.length > MAX_BATCH_SIZE) {
+    return c.json({ error: `Batch exceeds maximum of ${MAX_BATCH_SIZE} source maps.` }, 400);
+  }
+
   for (const entry of body.source_maps) {
+    if (!isValidFilePath(entry.file_path)) {
+      return c.json({ error: `Invalid file_path: "${entry.file_path}". Must be relative and contain no traversal sequences.` }, 400);
+    }
+    if (entry.source_map.length > MAX_SOURCE_MAP_BYTES) {
+      return c.json({ error: `Source map "${entry.file_path}" exceeds maximum size.` }, 400);
+    }
     dbStoreSourceMap(body.project_id, body.release, entry.file_path, entry.source_map);
   }
 

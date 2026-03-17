@@ -274,15 +274,12 @@ describe('GraphStore — basic functions', () => {
     await store.close();
   });
 
-  it('createGraphStore returns a store with all expected methods', () => {
-    expect(store).toBeDefined();
-    expect(store.buildGraph).toBeTypeOf('function');
-    expect(store.getFunction).toBeTypeOf('function');
-    expect(store.getCallers).toBeTypeOf('function');
-    expect(store.getCallees).toBeTypeOf('function');
-    expect(store.getImportsOf).toBeTypeOf('function');
-    expect(store.query).toBeTypeOf('function');
-    expect(store.close).toBeTypeOf('function');
+  it('createGraphStore returns a store that can query the graph', async () => {
+    // Verify the store is functional by executing an actual query
+    const rows = await store.query('MATCH (n) RETURN count(n) AS total');
+    const total = (rows as Array<Record<string, unknown>>)[0]['total'];
+    expect(typeof total).toBe('number');
+    expect(total as number).toBeGreaterThan(0);
   });
 
   it('inserts function nodes from parsed files', async () => {
@@ -545,5 +542,52 @@ describe('GraphStore — close', () => {
     const store = await createGraphStore(':memory:');
     await store.buildGraph(mockParsedFiles);
     await expect(store.close()).resolves.toBeUndefined();
+  });
+});
+
+describe('GraphStore — Cypher escaping via imports', () => {
+  it('handles module names with single quotes', async () => {
+    const store = await createGraphStore(':memory:');
+    const files: ParsedFile[] = [
+      {
+        filePath: 'src/app.ts',
+        language: 'typescript',
+        functions: [],
+        classes: [],
+        imports: [
+          { source: "o'reilly-sdk", specifiers: ['Client'], filePath: 'src/app.ts', line: 1 },
+        ],
+        exports: [],
+        callSites: [],
+      },
+    ];
+    await store.buildGraph(files);
+
+    const rows = await store.query("MATCH (m:Module) WHERE m.name = 'o\\'reilly-sdk' RETURN m.name");
+    expect((rows as Array<Record<string, unknown>>)).toHaveLength(1);
+    await store.close();
+  });
+
+  it('handles module names with backslashes', async () => {
+    const store = await createGraphStore(':memory:');
+    const files: ParsedFile[] = [
+      {
+        filePath: 'src/app.ts',
+        language: 'typescript',
+        functions: [],
+        classes: [],
+        imports: [
+          { source: 'path\\to\\module', specifiers: ['util'], filePath: 'src/app.ts', line: 1 },
+        ],
+        exports: [],
+        callSites: [],
+      },
+    ];
+    await store.buildGraph(files);
+
+    const rows = await store.query("MATCH (m:Module) RETURN m.name");
+    const names = (rows as Array<Record<string, unknown>>).map((r) => r['m.name']);
+    expect(names).toContain('path\\to\\module');
+    await store.close();
   });
 });

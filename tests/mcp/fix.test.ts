@@ -6,6 +6,8 @@ vi.mock('../../src/autofix/secret-fixer.js', () => ({
 
 vi.mock('../../src/autofix/pr-generator.js', () => ({
   generateFix: vi.fn(),
+  parseStackTrace: vi.fn(),
+  generateAutoFixPr: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', async () => {

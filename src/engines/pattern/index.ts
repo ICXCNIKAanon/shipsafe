@@ -4,6 +4,7 @@ import { SEVERITY_ORDER } from '../../constants.js';
 import { checkSemgrepInstalled, runSemgrep } from './semgrep.js';
 import { checkGitleaksInstalled, runGitleaks } from './gitleaks.js';
 import { checkTrivyInstalled, runTrivy } from './trivy.js';
+import { runGraphEngine, isGraphEngineAvailable } from '../graph/index.js';
 
 export interface PatternEngineOptions {
   targetPath: string;
@@ -97,6 +98,16 @@ export async function runPatternEngine(options: PatternEngineOptions): Promise<S
       findings.push(...result.value);
     }
     // Rejected promises are silently skipped (scanner failure is non-fatal)
+  }
+
+  // 5b. Run graph engine (optional — failures are non-fatal)
+  if (isGraphEngineAvailable()) {
+    try {
+      const graphResult = await runGraphEngine({ targetPath, scope });
+      findings.push(...graphResult.findings);
+    } catch {
+      // Graph engine failure is non-fatal — pattern results are still returned
+    }
   }
 
   // 6. Sort findings by severity (critical first)

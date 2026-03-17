@@ -1,0 +1,111 @@
+import os from 'node:os';
+import path from 'node:path';
+import { rm, mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import type { Finding, ScanScope } from '../../types.js';
+import { initParser, parseProject } from './parser.js';
+import { createGraphStore } from './store.js';
+import {
+  findAttackPaths,
+  findBlastRadius,
+  findMissingAuth,
+  queryResultsToFindings,
+} from './queries.js';
+
+// ── Public types ──
+
+export interface GraphEngineResult {
+  findings: Finding[];
+  stats: {
+    filesScanned: number;
+    functionsFound: number;
+    classesFound: number;
+    callEdges: number;
+    attackPathsFound: number;
+  };
+  duration_ms: number;
+}
+
+// ── Public API ──
+
+/** Check if graph engine dependencies are available (tree-sitter, etc.) */
+export function isGraphEngineAvailable(): boolean {
+  try {
+    // web-tree-sitter is a bundled dependency, so if we got here it's available
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Run the full Knowledge Graph analysis on a project. */
+export async function runGraphEngine(options: {
+  targetPath: string;
+  scope: ScanScope;
+}): Promise<GraphEngineResult> {
+  const startTime = Date.now();
+  const { targetPath } = options;
+
+  // 1. Initialize the parser
+  await initParser();
+
+  // 2. Parse project files
+  const parsedFiles = await parseProject(targetPath);
+
+  // 3. Create a temporary graph store
+  const tmpDir = path.join(os.tmpdir(), `shipsafe-graph-${randomUUID()}`);
+  await mkdir(tmpDir, { recursive: true });
+  const store = await createGraphStore(tmpDir);
+
+  try {
+    // 4. Build the graph from parsed files
+    await store.buildGraph(parsedFiles);
+
+    // 5. Compute stats
+    const totalFunctions = parsedFiles.reduce((sum, f) => sum + f.functions.length, 0);
+    const totalClasses = parsedFiles.reduce((sum, f) => sum + f.classes.length, 0);
+    const totalCallEdges = parsedFiles.reduce((sum, f) => sum + f.callSites.length, 0);
+
+    // 6. Run all security queries
+    const attackPaths = await findAttackPaths(store);
+
+    // Find blast radius for any known-vulnerable functions (sinks)
+    const sinkNames = new Set<string>();
+    for (const ap of attackPaths) {
+      if (!ap.hasValidation) {
+        sinkNames.add(ap.sink.name);
+      }
+    }
+    const blastRadiusResults = [];
+    for (const sinkName of sinkNames) {
+      const br = await findBlastRadius(store, sinkName);
+      blastRadiusResults.push(br);
+    }
+
+    const missingAuth = await findMissingAuth(store);
+
+    // 7. Convert results to findings
+    const findings = queryResultsToFindings(attackPaths, blastRadiusResults, missingAuth);
+
+    // 8. Return findings with stats and timing
+    return {
+      findings,
+      stats: {
+        filesScanned: parsedFiles.length,
+        functionsFound: totalFunctions,
+        classesFound: totalClasses,
+        callEdges: totalCallEdges,
+        attackPathsFound: attackPaths.length,
+      },
+      duration_ms: Date.now() - startTime,
+    };
+  } finally {
+    // 9. Clean up (close graph store and remove temp directory)
+    await store.close();
+    try {
+      await rm(tmpDir, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+}

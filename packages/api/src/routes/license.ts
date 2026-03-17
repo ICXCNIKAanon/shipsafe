@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
-import type { LicenseInfo, LicenseTier } from '../types.js';
+import type { LicenseInfo, LicenseTier, AppVariables } from '../types.js';
+import { rateLimiter } from '../middleware/rate-limit.js';
 
-export const licenseRoutes = new Hono();
+export const licenseRoutes = new Hono<{ Variables: AppVariables }>();
 
 /**
  * License key format: SS-{TIER}-{RANDOM}
@@ -39,7 +40,7 @@ function validateLicenseKey(key: string): LicenseInfo | null {
   };
 }
 
-licenseRoutes.post('/license/validate', async (c) => {
+licenseRoutes.post('/license/validate', rateLimiter(30, 60_000), async (c) => {
   let body: { license_key?: string };
 
   try {

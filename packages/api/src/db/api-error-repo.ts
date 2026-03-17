@@ -72,7 +72,11 @@ export function dbGetApiErrors(
   }
 
   const where = conditions.join(' AND ');
-  const limitClause = options?.limit ? ` LIMIT ${options.limit}` : '';
+  const safeLimit = options?.limit && Number.isInteger(options.limit) && options.limit > 0
+    ? options.limit
+    : null;
+  const limitClause = safeLimit ? ' LIMIT ?' : '';
+  if (safeLimit) params.push(safeLimit);
 
   const rows = db
     .prepare(`SELECT * FROM api_errors WHERE ${where} ORDER BY timestamp DESC${limitClause}`)

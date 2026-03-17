@@ -1,5 +1,16 @@
+import * as path from 'node:path';
 import { SourceMapConsumer } from 'source-map';
 import { dbGetSourceMap } from '../db/sourcemap-repo.js';
+
+/**
+ * Normalize a source path and strip any traversal sequences.
+ * Ensures the result is a relative path within the project.
+ */
+function sanitizePath(raw: string): string {
+  const normalized = path.normalize(raw).replace(/\\/g, '/');
+  // Remove leading slashes and any remaining ../ segments
+  return normalized.replace(/^(\/|\.\.\/)+/g, '');
+}
 
 interface ResolvedFrame {
   file: string;
@@ -37,7 +48,7 @@ export async function resolveStackFrame(
       const pos = consumer.originalPositionFor({ line, column });
 
       if (pos.source && !pos.source.includes('node_modules')) {
-        const cleanPath = pos.source.replace(/^(\.\.\/)+/, '');
+        const cleanPath = sanitizePath(pos.source);
         return {
           file: cleanPath,
           line: pos.line ?? line,
@@ -69,7 +80,7 @@ function extractSourceFallback(
     if (!originalSource) {
       return { file, line };
     }
-    const cleanPath = originalSource.replace(/^(\.\.\/)+/, '');
+    const cleanPath = sanitizePath(originalSource);
     return { file: cleanPath, line };
   }
   return { file, line };

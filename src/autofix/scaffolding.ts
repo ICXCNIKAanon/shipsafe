@@ -127,8 +127,8 @@ function getNextjsRecommendations(packageJson: PackageJson): SecurityRecommendat
     fix: `// In next.config.js or middleware.ts:
 const cspHeader = \`
   default-src 'self';
-  script-src 'self' 'unsafe-eval' 'unsafe-inline';
-  style-src 'self' 'unsafe-inline';
+  script-src 'self';
+  style-src 'self';
   img-src 'self' blob: data:;
   font-src 'self';
   connect-src 'self';

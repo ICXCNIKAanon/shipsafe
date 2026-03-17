@@ -3,5 +3,8 @@ dist/
 *.tsbuildinfo
 .env
 .env.*
+.env.local
+.env.*.local
 coverage/
 .DS_Store
+.shipsafe/

@@ -15,6 +15,9 @@
     "error-tracking",
     "api"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "author": "Connect Holdings LLC",
   "license": "UNLICENSED",
   "dependencies": {

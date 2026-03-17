@@ -13,9 +13,9 @@ vi.mock('chalk', () => {
   return { default: chainable };
 });
 
-// Mock child_process.exec to avoid opening a real browser
+// Mock child_process.execFile to avoid opening a real browser
 vi.mock('node:child_process', () => ({
-  exec: vi.fn((_cmd: string, _cb: Function) => {}),
+  execFile: vi.fn((_cmd: string, _args: string[], _cb: Function) => {}),
 }));
 
 import {

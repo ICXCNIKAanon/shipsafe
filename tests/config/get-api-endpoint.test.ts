@@ -37,4 +37,21 @@ describe('getApiEndpoint', () => {
     process.env.SHIPSAFE_API_URL = 'https://staging.shipsafe.org';
     expect(getApiEndpoint()).toBe('https://staging.shipsafe.org');
   });
+
+  it('falls back to config when env var is empty string', () => {
+    process.env.SHIPSAFE_API_URL = '';
+    expect(getApiEndpoint({ apiEndpoint: 'https://api.shipsafe.org' })).toBe(
+      'https://api.shipsafe.org',
+    );
+  });
+
+  it('falls back to default when env var is whitespace only', () => {
+    process.env.SHIPSAFE_API_URL = '   ';
+    expect(getApiEndpoint()).toBe(DEFAULT_API_URL);
+  });
+
+  it('trims whitespace from env var value', () => {
+    process.env.SHIPSAFE_API_URL = '  https://trimmed.example.com  ';
+    expect(getApiEndpoint()).toBe('https://trimmed.example.com');
+  });
 });

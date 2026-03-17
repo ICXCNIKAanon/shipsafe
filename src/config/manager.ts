@@ -115,7 +115,10 @@ export async function loadConfig(projectDir?: string): Promise<ShipSafeConfig> {
  * Returns the API endpoint. Priority: SHIPSAFE_API_URL env var > config value > default.
  */
 export function getApiEndpoint(config?: Pick<ShipSafeConfig, 'apiEndpoint'>): string {
-  return process.env.SHIPSAFE_API_URL ?? config?.apiEndpoint ?? DEFAULT_API_URL;
+  const envUrl = process.env.SHIPSAFE_API_URL?.trim();
+  if (envUrl) return envUrl;
+  if (config?.apiEndpoint) return config.apiEndpoint;
+  return DEFAULT_API_URL;
 }
 
 /**

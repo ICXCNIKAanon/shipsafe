@@ -114,4 +114,23 @@ describe('gateFeature', () => {
 
     expect(result.allowed).toBe(true);
   });
+
+  it('propagates exception when checkLicense throws', async () => {
+    mockCheckLicense.mockRejectedValue(new Error('fs read failed'));
+
+    await expect(gateFeature('scan')).rejects.toThrow('fs read failed');
+  });
+
+  it('uses tier from license even when valid is false', async () => {
+    mockCheckLicense.mockResolvedValue({
+      valid: false,
+      tier: 'pro',
+      reason: 'License cache expired',
+    });
+
+    const result = await gateFeature('autofix');
+
+    expect(result.allowed).toBe(true);
+    expect(result.tier).toBe('pro');
+  });
 });

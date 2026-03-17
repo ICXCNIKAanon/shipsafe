@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { GLOBAL_DIR_NAME } from '../constants.js';
@@ -66,16 +66,20 @@ export async function saveConnectionConfig(): Promise<void> {
 export function openInBrowser(url: string): void {
   const platform = process.platform;
   let command: string;
+  let args: string[];
 
   if (platform === 'darwin') {
-    command = `open "${url}"`;
+    command = 'open';
+    args = [url];
   } else if (platform === 'win32') {
-    command = `start "${url}"`;
+    command = 'cmd';
+    args = ['/c', 'start', '', url];
   } else {
-    command = `xdg-open "${url}"`;
+    command = 'xdg-open';
+    args = [url];
   }
 
-  exec(command, () => {
+  execFile(command, args, () => {
     // Silently ignore errors — user can open the URL manually
   });
 }

@@ -28,8 +28,10 @@ vi.mock('../../src/config/manager.js', async () => {
 
 import { handleUploadSourcemaps } from '../../src/cli/upload-sourcemaps.js';
 import { loadConfig } from '../../src/config/manager.js';
+import { gateFeature } from '../../src/cli/license-gate.js';
 
 const mockedLoadConfig = vi.mocked(loadConfig);
+const mockedGateFeature = vi.mocked(gateFeature);
 
 async function makeTmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(tmpdir(), 'shipsafe-upload-test-'));
@@ -192,5 +194,26 @@ describe('handleUploadSourcemaps', () => {
     // release should be 'unknown' or a version string — not empty
     expect(typeof body.release).toBe('string');
     expect(body.release.length).toBeGreaterThan(0);
+  });
+
+  it('blocks upload when license tier is insufficient', async () => {
+    await fs.writeFile(path.join(tmpDir, 'app.js.map'), '{}');
+
+    mockedGateFeature.mockResolvedValueOnce({
+      allowed: false,
+      tier: 'free',
+      reason: 'The "upload_sourcemaps" feature requires a higher license tier.',
+    });
+
+    mockedLoadConfig.mockResolvedValue({
+      apiEndpoint: 'https://api.shipsafe.org',
+      projectId: 'proj-123',
+    });
+
+    await handleUploadSourcemaps({ dir: tmpDir, release: '1.0.0' });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(output).toContain('higher license tier');
   });
 });

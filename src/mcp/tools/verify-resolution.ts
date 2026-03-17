@@ -1,4 +1,4 @@
-import { loadConfig } from '../../config/manager.js';
+import { loadConfig, getApiEndpoint } from '../../config/manager.js';
 
 export interface VerifyResolutionParams {
   error_id: string;
@@ -19,7 +19,7 @@ export async function handleVerifyResolution(
   const projectDir = process.cwd();
   const config = await loadConfig(projectDir);
 
-  if (!config.projectId || !config.apiEndpoint) {
+  if (!config.projectId) {
     return {
       error_id,
       status: 'unknown',
@@ -27,9 +27,10 @@ export async function handleVerifyResolution(
     };
   }
 
+  const apiEndpoint = getApiEndpoint(config);
   const url = new URL(
     `/v1/errors/${config.projectId}/${error_id}/status`,
-    config.apiEndpoint,
+    apiEndpoint,
   );
 
   try {

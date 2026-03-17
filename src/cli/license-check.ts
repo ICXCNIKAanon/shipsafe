@@ -1,4 +1,4 @@
-import { loadGlobalConfig, saveGlobalConfig } from '../config/manager.js';
+import { loadGlobalConfig, saveGlobalConfig, getApiEndpoint } from '../config/manager.js';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -51,18 +51,17 @@ export async function checkLicense(): Promise<LicenseCheckResult> {
     }
 
     // Cache expired — try to re-validate online
-    if (config.apiEndpoint) {
-      const result = await validateOnline(config.apiEndpoint, config.licenseKey);
+    const endpoint = getApiEndpoint(config);
+    const result = await validateOnline(endpoint, config.licenseKey);
 
-      if (result !== null) {
-        // Online validation succeeded — update cache
-        await saveGlobalConfig({
-          ...config,
-          licenseValidatedAt: new Date().toISOString(),
-          licenseTier: result.tier,
-        });
-        return { valid: result.valid, tier: result.tier };
-      }
+    if (result !== null) {
+      // Online validation succeeded — update cache
+      await saveGlobalConfig({
+        ...config,
+        licenseValidatedAt: new Date().toISOString(),
+        licenseTier: result.tier,
+      });
+      return { valid: result.valid, tier: result.tier };
     }
 
     // Offline with expired cache
@@ -74,18 +73,17 @@ export async function checkLicense(): Promise<LicenseCheckResult> {
   }
 
   // No licenseValidatedAt — try online validation, fallback to first-time grace
-  if (config.apiEndpoint) {
-    const result = await validateOnline(config.apiEndpoint, config.licenseKey);
+  const endpoint = getApiEndpoint(config);
+  const onlineResult = await validateOnline(endpoint, config.licenseKey);
 
-    if (result !== null) {
-      // Online validation succeeded — update cache
-      await saveGlobalConfig({
-        ...config,
-        licenseValidatedAt: new Date().toISOString(),
-        licenseTier: result.tier,
-      });
-      return { valid: result.valid, tier: result.tier };
-    }
+  if (onlineResult !== null) {
+    // Online validation succeeded — update cache
+    await saveGlobalConfig({
+      ...config,
+      licenseValidatedAt: new Date().toISOString(),
+      licenseTier: onlineResult.tier,
+    });
+    return { valid: onlineResult.valid, tier: onlineResult.tier };
   }
 
   // No validation timestamp and offline — first-time grace

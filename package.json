@@ -16,6 +16,11 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakewlittle-cs/shipsafe.git"
+  },
+  "homepage": "https://shipsafe.org",
   "keywords": [
     "security",
     "scanning",

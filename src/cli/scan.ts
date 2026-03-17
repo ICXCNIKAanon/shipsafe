@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import type { ScanResult, ScanScope, Severity } from '../types.js';
 import { runPatternEngine } from '../engines/pattern/index.js';
 import { fixHardcodedSecret } from '../autofix/secret-fixer.js';
+import { gateFeature } from './license-gate.js';
 
 export interface ScanOptions {
   scope: string;
@@ -53,10 +54,15 @@ export async function handleScanAction(options: ScanOptions): Promise<void> {
   });
 
   if (options.fix) {
-    for (const finding of result.findings) {
-      if (finding.type === 'hardcoded_secret' && finding.auto_fixable) {
-        const fix = await fixHardcodedSecret(finding);
-        console.log(chalk.green(`Fixed: moved ${fix.envVarName} to .env in ${finding.file}:${finding.line}`));
+    const gate = await gateFeature('autofix');
+    if (!gate.allowed) {
+      console.log(chalk.yellow(`\n${gate.reason}`));
+    } else {
+      for (const finding of result.findings) {
+        if (finding.type === 'hardcoded_secret' && finding.auto_fixable) {
+          const fix = await fixHardcodedSecret(finding);
+          console.log(chalk.green(`Fixed: moved ${fix.envVarName} to .env in ${finding.file}:${finding.line}`));
+        }
       }
     }
   }

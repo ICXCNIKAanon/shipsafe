@@ -11,10 +11,14 @@ vi.mock('chalk', () => {
 });
 
 // Mock config manager
-vi.mock('../../src/config/manager.js', () => ({
-  loadGlobalConfig: vi.fn(),
-  saveGlobalConfig: vi.fn(),
-}));
+vi.mock('../../src/config/manager.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/config/manager.js')>('../../src/config/manager.js');
+  return {
+    loadGlobalConfig: vi.fn(),
+    saveGlobalConfig: vi.fn(),
+    getApiEndpoint: actual.getApiEndpoint,
+  };
+});
 
 import { handleActivateAction } from '../../src/cli/activate.js';
 import { loadGlobalConfig, saveGlobalConfig } from '../../src/config/manager.js';
@@ -104,21 +108,28 @@ describe('handleActivateAction', () => {
     expect(output).toContain('Could not validate online. License saved locally.');
   });
 
-  it('saves key without validation when no apiEndpoint is configured', async () => {
+  it('uses default endpoint when no apiEndpoint is configured', async () => {
     mockLoadGlobalConfig.mockResolvedValue({
       monitoring: { enabled: true, error_sample_rate: 1, performance_sample_rate: 1 },
       scan: { ignore_paths: [], ignore_rules: [], severity_threshold: 'high' },
     });
 
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ valid: true, tier: 'pro', expires_at: '2027-01-01', project_limit: 10 }),
+    } as Response);
+
     await handleActivateAction('MY-LICENSE-KEY');
 
-    expect(mockSaveGlobalConfig).toHaveBeenCalledTimes(1);
-    const savedConfig = mockSaveGlobalConfig.mock.calls[0]![0];
-    expect(savedConfig.licenseKey).toBe('MY-LICENSE-KEY');
-    expect(savedConfig.licenseValidatedAt).toBeUndefined();
+    // Should attempt validation against default endpoint
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0]![0]).toContain('/v1/license/validate');
 
-    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('ShipSafe Pro activated successfully!');
+    // Should save key + validation metadata
+    expect(mockSaveGlobalConfig).toHaveBeenCalledTimes(2);
+    const secondCall = mockSaveGlobalConfig.mock.calls[1]![0];
+    expect(secondCall.licenseKey).toBe('MY-LICENSE-KEY');
+    expect(secondCall.licenseTier).toBe('pro');
   });
 
   it('prints error and rolls back when API returns invalid key', async () => {

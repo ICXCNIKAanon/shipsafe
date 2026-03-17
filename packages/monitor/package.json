@@ -9,11 +9,20 @@
     ".": "./dist/index.js",
     "./node": "./dist/node/index.js"
   },
+  "files": [
+    "dist/"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakewlittle-cs/shipsafe.git",
+    "directory": "packages/monitor"
+  },
+  "homepage": "https://shipsafe.org",
   "keywords": ["monitoring", "error-tracking", "performance"],
   "author": "Connect Holdings LLC",
   "license": "MIT",

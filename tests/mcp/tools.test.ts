@@ -7,10 +7,14 @@ vi.mock('../../src/engines/pattern/index.js', () => ({
   getAvailableScanners: vi.fn(),
 }));
 
-vi.mock('../../src/config/manager.js', () => ({
-  getProjectName: vi.fn(),
-  loadConfig: vi.fn(),
-}));
+vi.mock('../../src/config/manager.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/config/manager.js')>('../../src/config/manager.js');
+  return {
+    getProjectName: vi.fn(),
+    loadConfig: vi.fn(),
+    getApiEndpoint: actual.getApiEndpoint,
+  };
+});
 
 vi.mock('../../src/hooks/installer.js', () => ({
   checkHooksInstalled: vi.fn(),

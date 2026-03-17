@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock config manager
-vi.mock('../../src/config/manager.js', () => ({
-  loadGlobalConfig: vi.fn(),
-  saveGlobalConfig: vi.fn(),
-}));
+vi.mock('../../src/config/manager.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/config/manager.js')>('../../src/config/manager.js');
+  return {
+    loadGlobalConfig: vi.fn(),
+    saveGlobalConfig: vi.fn(),
+    getApiEndpoint: actual.getApiEndpoint,
+  };
+});
 
 import { checkLicense } from '../../src/cli/license-check.js';
 import { loadGlobalConfig, saveGlobalConfig } from '../../src/config/manager.js';
@@ -213,17 +217,22 @@ describe('checkLicense', () => {
     expect(savedConfig.licenseTier).toBe('pro');
   });
 
-  it('returns valid: unknown tier when no apiEndpoint and no validation timestamp', async () => {
+  it('uses default endpoint when no apiEndpoint configured and no validation timestamp', async () => {
     mockLoadGlobalConfig.mockResolvedValue({
       licenseKey: 'MY-KEY',
       monitoring: { enabled: true, error_sample_rate: 1, performance_sample_rate: 1 },
       scan: { ignore_paths: [], ignore_rules: [], severity_threshold: 'high' },
     });
 
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Network error'));
+
     const result = await checkLicense();
 
+    // Falls back to first-time grace when offline
     expect(result.valid).toBe(true);
     expect(result.tier).toBe('unknown');
-    expect(mockSaveGlobalConfig).not.toHaveBeenCalled();
+    // Should have attempted fetch against default endpoint
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0]![0]).toContain('/v1/license/validate');
   });
 });

@@ -6,8 +6,8 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "tsx watch src/serve.ts",
+    "start": "node dist/serve.js",
     "test": "vitest run"
   },
   "keywords": [
@@ -18,6 +18,7 @@
   "author": "Connect Holdings LLC",
   "license": "UNLICENSED",
   "dependencies": {
+    "@hono/node-server": "^1.19.11",
     "better-sqlite3": "^12.8.0",
     "hono": "^4.0.0",
     "source-map": "^0.7.6"

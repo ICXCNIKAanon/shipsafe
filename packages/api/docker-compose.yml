@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    ports:
+      - "3747:3747"
+    environment:
+      - PORT=3747
+      - SHIPSAFE_DB_PATH=/data/shipsafe.db
+    volumes:
+      - shipsafe-data:/data
+
+volumes:
+  shipsafe-data:

@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type { ShipSafeConfig } from '../types.js';
-import { GLOBAL_DIR_NAME, CONFIG_FILE, DEFAULT_CONFIG } from '../constants.js';
+import { GLOBAL_DIR_NAME, CONFIG_FILE, DEFAULT_CONFIG, DEFAULT_API_URL } from '../constants.js';
 
 /**
  * Deep merge two objects. Source values override target values.
@@ -109,6 +109,13 @@ export async function loadConfig(projectDir?: string): Promise<ShipSafeConfig> {
     withGlobal,
     projectRaw as Record<string, unknown>,
   ) as ShipSafeConfig;
+}
+
+/**
+ * Returns the API endpoint. Priority: SHIPSAFE_API_URL env var > config value > default.
+ */
+export function getApiEndpoint(config?: Pick<ShipSafeConfig, 'apiEndpoint'>): string {
+  return process.env.SHIPSAFE_API_URL ?? config?.apiEndpoint ?? DEFAULT_API_URL;
 }
 
 /**

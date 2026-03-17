@@ -10,6 +10,10 @@ vi.mock('../../src/autofix/secret-fixer.js', () => ({
   fixHardcodedSecret: vi.fn(),
 }));
 
+vi.mock('../../src/cli/license-gate.js', () => ({
+  gateFeature: vi.fn().mockResolvedValue({ allowed: true, tier: 'pro' }),
+}));
+
 // Mock chalk to return plain strings for testability
 vi.mock('chalk', () => {
   const passthrough = (str: string) => str;

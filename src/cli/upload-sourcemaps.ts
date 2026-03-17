@@ -3,7 +3,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { loadConfig } from '../../src/config/manager.js';
+import { loadConfig, getApiEndpoint } from '../config/manager.js';
+import { gateFeature } from './license-gate.js';
 
 /**
  * Recursively find all .map files in a directory.
@@ -63,6 +64,12 @@ export async function handleUploadSourcemaps(options: {
   dir: string;
   release?: string;
 }): Promise<void> {
+  const gate = await gateFeature('upload_sourcemaps');
+  if (!gate.allowed) {
+    console.log(chalk.yellow(`\n${gate.reason}`));
+    return;
+  }
+
   const targetDir = path.resolve(process.cwd(), options.dir);
 
   // Verify directory exists
@@ -99,14 +106,16 @@ export async function handleUploadSourcemaps(options: {
   // Load config
   const config = await loadConfig();
 
-  if (!config.apiEndpoint || !config.projectId) {
+  if (!config.projectId) {
     console.log(
       chalk.yellow(
-        'Warning: No API endpoint or project ID configured. Run `shipsafe setup` to connect.',
+        'Warning: No project ID configured. Run `shipsafe setup` to connect.',
       ),
     );
     return;
   }
+
+  const apiEndpoint = getApiEndpoint(config);
 
   // Determine release version
   const release = options.release ?? readVersionFromPackageJson() ?? 'unknown';
@@ -128,7 +137,7 @@ export async function handleUploadSourcemaps(options: {
   }
 
   // POST to API
-  const url = `${config.apiEndpoint}/v1/sourcemaps/batch`;
+  const url = `${apiEndpoint}/v1/sourcemaps/batch`;
   let response: Response;
   try {
     response = await fetch(url, {

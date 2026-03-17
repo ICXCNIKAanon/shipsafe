@@ -13,10 +13,18 @@ vi.mock('chalk', () => {
   return { default: chainable };
 });
 
-// Mock the config manager
-vi.mock('../../src/config/manager.js', () => ({
-  loadConfig: vi.fn(),
+vi.mock('../../src/cli/license-gate.js', () => ({
+  gateFeature: vi.fn().mockResolvedValue({ allowed: true, tier: 'team' }),
 }));
+
+// Mock the config manager
+vi.mock('../../src/config/manager.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/config/manager.js')>('../../src/config/manager.js');
+  return {
+    loadConfig: vi.fn(),
+    getApiEndpoint: actual.getApiEndpoint,
+  };
+});
 
 import { handleUploadSourcemaps } from '../../src/cli/upload-sourcemaps.js';
 import { loadConfig } from '../../src/config/manager.js';
@@ -90,8 +98,7 @@ describe('handleUploadSourcemaps', () => {
     expect(headers['Authorization']).toBe('Bearer sk-test-abc');
   });
 
-  it('skips upload when no API endpoint is configured', async () => {
-    // Create a .map file to ensure the directory is non-empty
+  it('skips upload when no project ID is configured (empty config)', async () => {
     await fs.writeFile(path.join(tmpDir, 'app.js.map'), '{"version":3}');
 
     mockedLoadConfig.mockResolvedValue({});
@@ -101,7 +108,7 @@ describe('handleUploadSourcemaps', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
 
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('app.js.map');
+    expect(output).toContain('No project ID configured');
   });
 
   it('skips upload when no project ID is configured', async () => {

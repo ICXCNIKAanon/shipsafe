@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock dependencies before importing handler
-vi.mock('../../src/config/manager.js', () => ({
-  loadConfig: vi.fn(),
-}));
+vi.mock('../../src/config/manager.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/config/manager.js')>('../../src/config/manager.js');
+  return {
+    loadConfig: vi.fn(),
+    getApiEndpoint: actual.getApiEndpoint,
+  };
+});
 
 import { handleProductionErrors } from '../../src/mcp/tools/production-errors.js';
 import { loadConfig } from '../../src/config/manager.js';
@@ -121,18 +125,26 @@ describe('handleProductionErrors', () => {
     expect(result.warning).toContain('No project ID configured');
   });
 
-  it('returns empty array when no API endpoint configured', async () => {
+  it('uses default endpoint when no API endpoint configured', async () => {
     mockedLoadConfig.mockResolvedValue({
       projectId: 'proj_123',
       monitoring: { enabled: true, error_sample_rate: 1, performance_sample_rate: 1 },
       scan: { ignore_paths: [], ignore_rules: [], severity_threshold: 'high' },
     });
 
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ errors: [], count: 0 }),
+    });
+
     const result = await handleProductionErrors({});
 
     expect(result.errors).toEqual([]);
     expect(result.total).toBe(0);
-    expect(result.warning).toContain('No API endpoint configured');
+    // Should have used default endpoint
+    const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0];
+    const url = fetchCall[0] as string;
+    expect(url).toContain('localhost:3747');
   });
 
   it('returns warning when API returns non-OK response', async () => {

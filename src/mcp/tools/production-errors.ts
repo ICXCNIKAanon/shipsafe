@@ -1,4 +1,4 @@
-import { loadConfig } from '../../config/manager.js';
+import { loadConfig, getApiEndpoint } from '../../config/manager.js';
 
 export interface ProductionErrorsParams {
   severity?: 'all' | 'critical' | 'high' | 'medium' | 'low';
@@ -38,18 +38,11 @@ export async function handleProductionErrors(
     };
   }
 
-  if (!config.apiEndpoint) {
-    return {
-      errors: [],
-      total: 0,
-      warning: 'No API endpoint configured. Set apiEndpoint in shipsafe.config.json.',
-    };
-  }
-
+  const apiEndpoint = getApiEndpoint(config);
   const severity = params.severity ?? 'all';
   const status = params.status ?? 'open';
 
-  const url = new URL(`/v1/errors/${config.projectId}`, config.apiEndpoint);
+  const url = new URL(`/v1/errors/${config.projectId}`, apiEndpoint);
   url.searchParams.set('severity', severity);
   url.searchParams.set('status', status);
 

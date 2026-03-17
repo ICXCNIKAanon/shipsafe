@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { ScanResult, ScanScope, Severity } from '../types.js';
 import { runPatternEngine } from '../engines/pattern/index.js';
+import { fixHardcodedSecret } from '../autofix/secret-fixer.js';
 
 export interface ScanOptions {
   scope: string;
@@ -50,6 +51,15 @@ export async function handleScanAction(options: ScanOptions): Promise<void> {
     targetPath: process.cwd(),
     scope,
   });
+
+  if (options.fix) {
+    for (const finding of result.findings) {
+      if (finding.type === 'hardcoded_secret' && finding.auto_fixable) {
+        const fix = await fixHardcodedSecret(finding);
+        console.log(chalk.green(`Fixed: moved ${fix.envVarName} to .env in ${finding.file}:${finding.line}`));
+      }
+    }
+  }
 
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));

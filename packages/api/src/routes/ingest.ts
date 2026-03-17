@@ -3,8 +3,10 @@ import { projectAuth } from '../middleware/auth.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { deduplicateError } from '../services/dedup.js';
 import { dbStoreError, dbGetAllProjectErrors } from '../db/error-repo.js';
+import { dbStorePerformanceMetric } from '../db/performance-repo.js';
+import { dbStoreApiError } from '../db/api-error-repo.js';
 import { resolveStackFrame } from '../services/sourcemap-resolver.js';
-import type { ErrorEvent, IngestBody, AppVariables } from '../types.js';
+import type { ErrorEvent, PerformanceEvent, ApiErrorEvent, IngestBody, AppVariables } from '../types.js';
 
 export const ingestRoutes = new Hono<{ Variables: AppVariables }>();
 
@@ -50,8 +52,36 @@ ingestRoutes.post('/events', projectAuth, rateLimiter(), async (c) => {
       processedCount++;
     }
 
-    // Performance and api_error events — store later (Phase 5+)
-    // For now, we accept them but only process error events
+    if (event.type === 'performance') {
+      const perfEvent = event as PerformanceEvent;
+      dbStorePerformanceMetric({
+        id: crypto.randomUUID(),
+        project_id: projectId,
+        url: perfEvent.url,
+        ...perfEvent.metrics,
+        environment: perfEvent.environment,
+        timestamp: perfEvent.timestamp,
+      });
+      processedCount++;
+    }
+
+    if (event.type === 'api_error') {
+      const apiEvent = event as ApiErrorEvent;
+      dbStoreApiError({
+        id: crypto.randomUUID(),
+        project_id: projectId,
+        method: apiEvent.request.method,
+        path: apiEvent.request.path,
+        status_code: apiEvent.request.status_code,
+        duration_ms: apiEvent.request.duration_ms,
+        error_name: apiEvent.error?.name,
+        error_message: apiEvent.error?.message,
+        error_stack: apiEvent.error?.stack,
+        environment: apiEvent.environment,
+        timestamp: apiEvent.timestamp,
+      });
+      processedCount++;
+    }
   }
 
   return c.json(

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createDatabase, closeDatabase } from '../../src/db/database.js';
 import app from '../../src/index.js';
 import { dbGetAllProjectErrors } from '../../src/db/error-repo.js';
+import { dbGetPerformanceMetrics } from '../../src/db/performance-repo.js';
+import { dbGetApiErrors } from '../../src/db/api-error-repo.js';
 import { clearRateLimits } from '../../src/middleware/rate-limit.js';
 
 function makeErrorEvent(overrides: Record<string, unknown> = {}) {
@@ -118,10 +120,14 @@ describe('POST /v1/events', () => {
     expect(res.status).toBe(202);
     const body = await res.json();
     expect(body.accepted).toBe(3);
-    expect(body.processed).toBe(2); // Only error events are processed
+    expect(body.processed).toBe(3); // Error and performance events are processed
 
     const stored = dbGetAllProjectErrors('proj_123');
     expect(stored).toHaveLength(2);
+
+    const perfMetrics = dbGetPerformanceMetrics('proj_123');
+    expect(perfMetrics).toHaveLength(1);
+    expect(perfMetrics[0].page_load_ms).toBe(1200);
   });
 
   it('accepts events with X-Project-ID header', async () => {
@@ -138,6 +144,82 @@ describe('POST /v1/events', () => {
     });
 
     expect(res.status).toBe(202);
+  });
+
+  it('processes and stores performance events', async () => {
+    const res = await app.request('/v1/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: 'proj_perf',
+        events: [
+          {
+            type: 'performance',
+            timestamp: new Date().toISOString(),
+            project_id: 'proj_perf',
+            environment: 'production',
+            session_id: 'session_abc',
+            metrics: {
+              page_load_ms: 2000,
+              first_contentful_paint_ms: 900,
+              time_to_first_byte_ms: 150,
+            },
+            url: 'https://example.com/dashboard',
+          },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.accepted).toBe(1);
+    expect(body.processed).toBe(1);
+
+    const metrics = dbGetPerformanceMetrics('proj_perf');
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0].url).toBe('https://example.com/dashboard');
+    expect(metrics[0].page_load_ms).toBe(2000);
+    expect(metrics[0].first_contentful_paint_ms).toBe(900);
+  });
+
+  it('processes and stores api_error events', async () => {
+    const res = await app.request('/v1/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: 'proj_apierr',
+        events: [
+          {
+            type: 'api_error',
+            timestamp: new Date().toISOString(),
+            project_id: 'proj_apierr',
+            environment: 'production',
+            session_id: 'session_abc',
+            request: {
+              method: 'POST',
+              path: '/api/checkout',
+              status_code: 503,
+              duration_ms: 5000,
+            },
+            error: {
+              name: 'ServiceUnavailableError',
+              message: 'Upstream timeout',
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.accepted).toBe(1);
+    expect(body.processed).toBe(1);
+
+    const apiErrors = dbGetApiErrors('proj_apierr');
+    expect(apiErrors).toHaveLength(1);
+    expect(apiErrors[0].path).toBe('/api/checkout');
+    expect(apiErrors[0].status_code).toBe(503);
+    expect(apiErrors[0].error_name).toBe('ServiceUnavailableError');
   });
 
   it('returns 400 for missing events array', async () => {

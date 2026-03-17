@@ -25,6 +25,8 @@ export interface ScanResult {
 
 export interface ShipSafeConfig {
   licenseKey?: string;
+  licenseValidatedAt?: string;  // ISO timestamp of last successful validation
+  licenseTier?: string;         // cached tier from last validation
   projectId?: string;
   apiEndpoint?: string;
   monitoring?: {

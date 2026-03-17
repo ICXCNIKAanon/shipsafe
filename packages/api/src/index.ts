@@ -9,6 +9,8 @@ import { errorStatusRoutes } from './routes/error-status.js';
 import { healthRoutes } from './routes/health.js';
 import { licenseRoutes } from './routes/license.js';
 import { sourcemapRoutes } from './routes/sourcemaps.js';
+import { performanceRoutes } from './routes/performance.js';
+import { apiErrorRoutes } from './routes/api-errors.js';
 
 // Initialize database — env var override or default to ~/.shipsafe/shipsafe.db
 if (process.env.NODE_ENV !== 'test') {
@@ -27,6 +29,8 @@ app.route('/v1', ingestRoutes);
 app.route('/v1', errorRoutes);
 app.route('/v1', errorStatusRoutes);
 app.route('/v1', sourcemapRoutes);
+app.route('/v1', performanceRoutes);
+app.route('/v1', apiErrorRoutes);
 app.route('/', healthRoutes);
 app.route('/v1', licenseRoutes);
 

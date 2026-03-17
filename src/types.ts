@@ -26,6 +26,7 @@ export interface ScanResult {
 export interface ShipSafeConfig {
   licenseKey?: string;
   projectId?: string;
+  apiEndpoint?: string;
   monitoring?: {
     enabled: boolean;
     error_sample_rate: number;

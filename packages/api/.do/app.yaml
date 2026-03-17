@@ -1,0 +1,22 @@
+name: shipsafe-api
+region: nyc
+services:
+  - name: api
+    github:
+      repo: jakewlittle-cs/shipsafe
+      branch: main
+      deploy_on_push: true
+    source_dir: packages/api
+    dockerfile_path: packages/api/Dockerfile
+    http_port: 3747
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    envs:
+      - key: PORT
+        value: "3747"
+      - key: SHIPSAFE_DB_PATH
+        value: "/data/shipsafe.db"
+      - key: SHIPSAFE_CORS_ORIGIN
+        value: "https://shipsafe.org"
+    health_check:
+      http_path: /health

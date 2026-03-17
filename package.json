@@ -6,8 +6,11 @@
   "bin": {
     "shipsafe": "./dist/bin/shipsafe.js"
   },
+  "files": [
+    "dist/"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/bin/shipsafe.js",
     "dev": "tsx bin/shipsafe.ts",
     "test": "vitest run",
     "test:watch": "vitest",

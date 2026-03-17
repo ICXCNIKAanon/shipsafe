@@ -5,6 +5,7 @@ import { registerScanCommand } from '../src/cli/scan.js';
 import { registerStatusCommand } from '../src/cli/status.js';
 import { registerActivateCommand } from '../src/cli/activate.js';
 import { registerSetupCommand } from '../src/cli/setup.js';
+import { registerConnectCommand } from '../src/cli/connect.js';
 
 const program = new Command();
 program
@@ -16,6 +17,7 @@ registerScanCommand(program);
 registerStatusCommand(program);
 registerActivateCommand(program);
 registerSetupCommand(program);
+registerConnectCommand(program);
 
 program
   .command('mcp-server')

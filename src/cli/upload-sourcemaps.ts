@@ -1,7 +1,9 @@
 import * as fs from 'node:fs/promises';
+import { readFileSync, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { loadConfig } from '../../src/config/manager.js';
 
 /**
  * Recursively find all .map files in a directory.
@@ -37,10 +39,30 @@ async function findSourceMaps(dir: string): Promise<string[]> {
 }
 
 /**
- * Upload source maps action — finds .map files and reports what would be uploaded.
- * Actual upload to ShipSafe API is stubbed for now.
+ * Reads the version field from package.json in the current working directory.
+ * Returns undefined if package.json is absent or has no version field.
  */
-export async function handleUploadSourcemaps(options: { dir: string }): Promise<void> {
+function readVersionFromPackageJson(): string | undefined {
+  const pkgPath = path.join(process.cwd(), 'package.json');
+  try {
+    if (existsSync(pkgPath)) {
+      const raw = readFileSync(pkgPath, 'utf-8');
+      const pkg = JSON.parse(raw) as { version?: string };
+      return pkg.version ?? undefined;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+/**
+ * Upload source maps action — finds .map files and uploads them to the ShipSafe API.
+ */
+export async function handleUploadSourcemaps(options: {
+  dir: string;
+  release?: string;
+}): Promise<void> {
   const targetDir = path.resolve(process.cwd(), options.dir);
 
   // Verify directory exists
@@ -74,9 +96,65 @@ export async function handleUploadSourcemaps(options: { dir: string }): Promise<
 
   console.log('');
 
-  // Stub: report what would be uploaded
+  // Load config
+  const config = await loadConfig();
+
+  if (!config.apiEndpoint || !config.projectId) {
+    console.log(
+      chalk.yellow(
+        'Warning: No API endpoint or project ID configured. Run `shipsafe setup` to connect.',
+      ),
+    );
+    return;
+  }
+
+  // Determine release version
+  const release = options.release ?? readVersionFromPackageJson() ?? 'unknown';
+
+  // Read all .map file contents
+  const sourceMaps: Array<{ file_path: string; source_map: string }> = [];
+  for (const file of mapFiles) {
+    const relativePath = path.relative(process.cwd(), file);
+    const content = await fs.readFile(file, 'utf-8');
+    sourceMaps.push({ file_path: relativePath, source_map: content });
+  }
+
+  // Build request headers
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (config.licenseKey) {
+    headers['Authorization'] = `Bearer ${config.licenseKey}`;
+  }
+
+  // POST to API
+  const url = `${config.apiEndpoint}/v1/sourcemaps/batch`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        project_id: config.projectId,
+        release,
+        source_maps: sourceMaps,
+      }),
+    });
+  } catch (err) {
+    console.error(chalk.red(`Upload failed: ${(err as Error).message}`));
+    return;
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(chalk.red(`Upload failed (${response.status}): ${text}`));
+    return;
+  }
+
   console.log(
-    chalk.green(`Found ${mapFiles.length} source map${mapFiles.length === 1 ? '' : 's'}, uploaded to ShipSafe.`),
+    chalk.green(
+      `Found ${mapFiles.length} source map${mapFiles.length === 1 ? '' : 's'}, uploaded to ShipSafe.`,
+    ),
   );
 }
 
@@ -88,7 +166,10 @@ export function registerUploadSourcemapsCommand(program: Command): void {
     .command('upload-sourcemaps')
     .description('Upload source maps for production stack trace resolution')
     .option('--dir <dir>', 'Directory containing source maps', './dist')
-    .action(async (options: { dir: string }) => {
-      await handleUploadSourcemaps(options);
+    .option('--release <version>', 'Release version tag for the source maps')
+    .action(async (options: { dir: string; release?: string }) => {
+      // Default release to package.json version if not specified
+      const release = options.release ?? readVersionFromPackageJson() ?? 'unknown';
+      await handleUploadSourcemaps({ dir: options.dir, release });
     });
 }

@@ -17,4 +17,12 @@ registerStatusCommand(program);
 registerActivateCommand(program);
 registerSetupCommand(program);
 
+program
+  .command('mcp-server')
+  .description('Start ShipSafe MCP server (stdio transport)')
+  .action(async () => {
+    const { startMcpServer } = await import('../src/mcp/server.js');
+    await startMcpServer();
+  });
+
 program.parse();

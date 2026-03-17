@@ -59,6 +59,96 @@ function extractPropertyName(message: string): string | null {
 }
 
 const FIX_PATTERNS: FixPattern[] = [
+  // 6. Missing await — ".then is not a function" means result is not a Promise
+  {
+    test: (msg) => /\.then is not a function/i.test(msg) || /is not a function.*promise/i.test(msg),
+    apply: (line) => {
+      // Find a function call pattern and prepend await
+      const match = line.match(/^(\s*(?:const|let|var)\s+\w+\s*=\s*)(\w+\()/);
+      if (match) {
+        return line.replace(match[2], `await ${match[2]}`);
+      }
+      // Try bare call: `  someFunc(...)`
+      const bareMatch = line.match(/^(\s*)(\w+\()/);
+      if (bareMatch) {
+        return `${bareMatch[1]}await ${line.trimStart()}`;
+      }
+      return null;
+    },
+    describe: () => 'Add missing await before Promise-returning function call to prevent .then TypeError',
+  },
+
+  // 7. Missing import — "Cannot find module 'X'"
+  {
+    test: (msg) => /Cannot find module '(.+)'/i.test(msg),
+    apply: (line, message) => {
+      const match = message.match(/Cannot find module '([^']+)'/i);
+      if (!match) return null;
+      const moduleName = match[1];
+      const trimmed = line.trimStart();
+      const indent = line.slice(0, line.length - trimmed.length);
+      return `${indent}import {} from '${moduleName}'; // TODO: specify named imports\n${line}`;
+    },
+    describe: (msg) => {
+      const match = msg.match(/Cannot find module '([^']+)'/i);
+      return `Add missing import statement for module '${match?.[1] ?? 'unknown'}'`;
+    },
+  },
+
+  // 8. Array index out of bounds — "Cannot read properties of undefined (reading '0')"
+  //    More specific: only when the reading key is a digit (array index)
+  {
+    test: (msg) =>
+      /Cannot read propert(?:y|ies).*of undefined/i.test(msg) &&
+      /reading '(\d+)'/.test(msg),
+    apply: (line) => {
+      const trimmed = line.trimStart();
+      const indent = line.slice(0, line.length - trimmed.length);
+      // Detect the array variable (e.g. `items[0]` → `items`)
+      const arrayMatch = trimmed.match(/(\w+)\[\d+\]/);
+      const arrName = arrayMatch ? arrayMatch[1] : 'arr';
+      return `${indent}if (${arrName} && ${arrName}.length > 0) { ${trimmed} }`;
+    },
+    describe: () => 'Add array bounds check to prevent undefined index access',
+  },
+
+  // 9. Missing null coalescing — "Cannot read properties of null (reading 'X')"
+  //    Must come BEFORE pattern 1 so we handle null specifically here.
+  {
+    test: (msg) =>
+      /Cannot read propert(?:y|ies)/.test(msg) && /\bnull\b/.test(msg) && !/undefined/.test(msg),
+    apply: (line, message) => {
+      const prop = extractPropertyName(message);
+      if (!prop) return null;
+      const pattern = new RegExp(`(?<!\\?)\\.(${prop})\\b`);
+      if (!pattern.test(line)) return null;
+      // Replace `.prop` with `?.prop ?? undefined`
+      return line.replace(pattern, `?.${prop} ?? undefined`);
+    },
+    describe: (msg) => {
+      const prop = extractPropertyName(msg);
+      return `Add optional chaining and nullish coalescing for null property '${prop ?? 'unknown'}' access`;
+    },
+  },
+
+  // 10. JSON parse error — "Unexpected token X in JSON"
+  {
+    test: (msg) => /Unexpected token.+JSON/i.test(msg) || /SyntaxError.*JSON/i.test(msg),
+    apply: (line) => {
+      if (!/JSON\.parse/.test(line)) return null;
+      const trimmed = line.trimStart();
+      const indent = line.slice(0, line.length - trimmed.length);
+      return [
+        `${indent}try {`,
+        `${indent}  ${trimmed}`,
+        `${indent}} catch {`,
+        `${indent}  /* handle JSON parse error */`,
+        `${indent}}`,
+      ].join('\n');
+    },
+    describe: () => 'Wrap JSON.parse in try/catch to handle malformed JSON input',
+  },
+
   // 1. TypeError: Cannot read property 'X' of null/undefined → optional chaining
   {
     test: (msg) =>

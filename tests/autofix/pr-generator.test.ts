@@ -137,6 +137,86 @@ describe('generateFix', () => {
     expect(result!.fixed).toContain('const config = undefined');
     expect(result!.description).toContain('config');
   });
+
+  // ── New pattern tests ──
+
+  it('adds await for missing await on Promise-returning call (.then is not a function)', () => {
+    const error = makeError({
+      message: "TypeError: .then is not a function",
+      file: 'src/fetch.ts',
+      line: 1,
+    });
+    const content = ['  const result = fetchData();', ''].join('\n');
+
+    const result = generateFix(error, content);
+
+    expect(result).not.toBeNull();
+    expect(result!.fixed).toContain('await fetchData()');
+    expect(result!.description).toContain('await');
+  });
+
+  it('adds import suggestion for Cannot find module error', () => {
+    const error = makeError({
+      message: "Cannot find module 'lodash'",
+      file: 'src/utils.ts',
+      line: 1,
+    });
+    const content = ['  const result = _.merge({}, defaults);', ''].join('\n');
+
+    const result = generateFix(error, content);
+
+    expect(result).not.toBeNull();
+    expect(result!.fixed).toContain("from 'lodash'");
+    expect(result!.description).toContain('import');
+  });
+
+  it('adds bounds check for array index out of bounds (undefined property read)', () => {
+    const error = makeError({
+      message: "TypeError: Cannot read properties of undefined (reading '0')",
+      file: 'src/list.ts',
+      line: 1,
+    });
+    const content = ['  const first = items[0];', ''].join('\n');
+
+    const result = generateFix(error, content);
+
+    expect(result).not.toBeNull();
+    expect(result!.fixed).toContain('length > 0');
+    expect(result!.description).toContain('bounds');
+  });
+
+  it('adds nullish coalescing for Cannot read properties of null', () => {
+    const error = makeError({
+      message: "TypeError: Cannot read properties of null (reading 'id')",
+      file: 'src/user.ts',
+      line: 1,
+    });
+    const content = ['  const id = user.id;', ''].join('\n');
+
+    const result = generateFix(error, content);
+
+    expect(result).not.toBeNull();
+    expect(result!.fixed).toContain('user?.id');
+    expect(result!.fixed).toContain('??');
+    expect(result!.description).toContain('null');
+  });
+
+  it('wraps JSON.parse in try/catch for Unexpected token JSON error', () => {
+    const error = makeError({
+      message: "SyntaxError: Unexpected token < in JSON at position 0",
+      file: 'src/parse.ts',
+      line: 1,
+    });
+    const content = ['  const data = JSON.parse(raw);', ''].join('\n');
+
+    const result = generateFix(error, content);
+
+    expect(result).not.toBeNull();
+    expect(result!.fixed).toContain('try {');
+    expect(result!.fixed).toContain('JSON.parse');
+    expect(result!.fixed).toContain('catch');
+    expect(result!.description).toContain('JSON');
+  });
 });
 
 describe('parseStackTrace', () => {

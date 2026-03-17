@@ -4,12 +4,14 @@ import { errorRoutes } from './routes/errors.js';
 import { errorStatusRoutes } from './routes/error-status.js';
 import { healthRoutes } from './routes/health.js';
 import { licenseRoutes } from './routes/license.js';
+import { sourcemapRoutes } from './routes/sourcemaps.js';
 
 const app = new Hono();
 
 app.route('/v1', ingestRoutes);
 app.route('/v1', errorRoutes);
 app.route('/v1', errorStatusRoutes);
+app.route('/v1', sourcemapRoutes);
 app.route('/', healthRoutes);
 app.route('/v1', licenseRoutes);
 

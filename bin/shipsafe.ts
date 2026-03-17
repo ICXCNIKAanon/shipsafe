@@ -4,6 +4,7 @@ import { VERSION } from '../src/constants.js';
 import { registerScanCommand } from '../src/cli/scan.js';
 import { registerStatusCommand } from '../src/cli/status.js';
 import { registerActivateCommand } from '../src/cli/activate.js';
+import { registerSetupCommand } from '../src/cli/setup.js';
 
 const program = new Command();
 program
@@ -14,5 +15,6 @@ program
 registerScanCommand(program);
 registerStatusCommand(program);
 registerActivateCommand(program);
+registerSetupCommand(program);
 
 program.parse();

@@ -51,3 +51,61 @@ export interface ScannerAvailability {
   gitleaks: boolean;
   trivy: boolean;
 }
+
+// ── Knowledge Graph: Tree-sitter parsing types ──
+
+export type SupportedLanguage = 'typescript' | 'javascript' | 'python';
+
+export interface ParsedFile {
+  filePath: string;
+  language: SupportedLanguage;
+  functions: FunctionNode[];
+  classes: ClassNode[];
+  imports: ImportNode[];
+  exports: ExportNode[];
+  callSites: CallSite[];
+}
+
+export interface FunctionNode {
+  name: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  params: string[];
+  isAsync: boolean;
+  isExported: boolean;
+  // For methods: the class they belong to
+  className?: string;
+}
+
+export interface ClassNode {
+  name: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  methods: string[];
+  isExported: boolean;
+}
+
+export interface ImportNode {
+  source: string; // the module path
+  specifiers: string[]; // imported names
+  filePath: string;
+  line: number;
+}
+
+export interface ExportNode {
+  name: string;
+  filePath: string;
+  line: number;
+  type: 'function' | 'class' | 'variable' | 'default';
+}
+
+export interface CallSite {
+  callerName: string; // function containing this call
+  calleeName: string; // function being called
+  filePath: string;
+  line: number;
+  // For method calls: the object the method is called on
+  receiver?: string;
+}

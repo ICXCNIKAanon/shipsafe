@@ -16,7 +16,14 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
   },
-  "keywords": ["security", "scanning", "mcp", "vibe-coding", "semgrep", "gitleaks"],
+  "keywords": [
+    "security",
+    "scanning",
+    "mcp",
+    "vibe-coding",
+    "semgrep",
+    "gitleaks"
+  ],
   "author": "Connect Holdings LLC",
   "license": "UNLICENSED",
   "engines": {
@@ -26,6 +33,9 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "chalk": "^5.4.0",
     "commander": "^13.0.0",
+    "kuzu": "^0.11.3",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.26.7",
     "zod": "^3.24.0"
   },
   "devDependencies": {

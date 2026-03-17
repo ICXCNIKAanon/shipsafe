@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { projectAuth } from '../middleware/auth.js';
 import { rateLimiter } from '../middleware/rate-limit.js';
 import { deduplicateError } from '../services/dedup.js';
-import { storeError, getAllProjectErrors } from '../services/error-store.js';
+import { dbStoreError, dbGetAllProjectErrors } from '../db/error-repo.js';
 import { resolveStackFrame } from '../services/sourcemap-resolver.js';
 import type { ErrorEvent, IngestBody, AppVariables } from '../types.js';
 
@@ -36,7 +36,7 @@ ingestRoutes.post('/events', projectAuth, rateLimiter(), async (c) => {
 
     if (event.type === 'error') {
       const errorEvent = event as ErrorEvent;
-      const existingErrors = getAllProjectErrors(projectId);
+      const existingErrors = dbGetAllProjectErrors(projectId);
       const processed = deduplicateError(errorEvent, existingErrors);
 
       // Enrich new errors with source map resolution when release info is present
@@ -46,7 +46,7 @@ ingestRoutes.post('/events', projectAuth, rateLimiter(), async (c) => {
         processed.line = resolved.line;
       }
 
-      storeError(processed);
+      dbStoreError(processed);
       processedCount++;
     }
 

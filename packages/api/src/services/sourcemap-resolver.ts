@@ -1,4 +1,4 @@
-import { getSourceMap } from './sourcemap-store.js';
+import { dbGetSourceMap } from '../db/sourcemap-repo.js';
 
 /**
  * Attempt to resolve a minified stack frame back to its original source file.
@@ -22,7 +22,7 @@ export function resolveStackFrame(
 
   // 1. Locate the source map content.
   const rawMap =
-    getSourceMap(projectId, release, `${file}.map`) ?? getSourceMap(projectId, release, file);
+    dbGetSourceMap(projectId, release, `${file}.map`) ?? dbGetSourceMap(projectId, release, file);
 
   if (rawMap === undefined) {
     return fallback;

@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createDatabase, closeDatabase } from '../../src/db/database.js';
 import app from '../../src/index.js';
-import { clearStore, storeError } from '../../src/services/error-store.js';
+import { dbStoreError } from '../../src/db/error-repo.js';
 import type { ProcessedError } from '../../src/types.js';
 
 function makeProcessedError(overrides: Partial<ProcessedError> = {}): ProcessedError {
@@ -26,12 +27,16 @@ function makeProcessedError(overrides: Partial<ProcessedError> = {}): ProcessedE
 
 describe('GET /v1/errors/:projectId/:errorId/status', () => {
   beforeEach(() => {
-    clearStore();
+    createDatabase(':memory:');
+  });
+
+  afterEach(() => {
+    closeDatabase();
   });
 
   it('returns recurring status for an existing open error', async () => {
     const error = makeProcessedError({ status: 'open', occurrences: 5 });
-    storeError(error);
+    dbStoreError(error);
 
     const res = await app.request(`/v1/errors/proj_test/${error.id}/status`);
     expect(res.status).toBe(200);
@@ -47,7 +52,7 @@ describe('GET /v1/errors/:projectId/:errorId/status', () => {
     // Use a last_seen 24 hours ago so confidence calculation is deterministic
     const lastSeen = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const error = makeProcessedError({ status: 'resolved', last_seen: lastSeen });
-    storeError(error);
+    dbStoreError(error);
 
     const res = await app.request(`/v1/errors/proj_test/${error.id}/status`);
     expect(res.status).toBe(200);

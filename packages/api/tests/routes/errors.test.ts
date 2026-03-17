@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createDatabase, closeDatabase } from '../../src/db/database.js';
 import app from '../../src/index.js';
-import { clearStore, storeError } from '../../src/services/error-store.js';
+import { dbStoreError } from '../../src/db/error-repo.js';
 import type { ProcessedError } from '../../src/types.js';
 
 function makeProcessedError(overrides: Partial<ProcessedError> = {}): ProcessedError {
@@ -25,14 +26,18 @@ function makeProcessedError(overrides: Partial<ProcessedError> = {}): ProcessedE
 
 describe('GET /v1/errors/:projectId', () => {
   beforeEach(() => {
-    clearStore();
+    createDatabase(':memory:');
+  });
+
+  afterEach(() => {
+    closeDatabase();
   });
 
   it('returns queued errors for a project', async () => {
     const error1 = makeProcessedError({ severity: 'critical' });
     const error2 = makeProcessedError({ severity: 'medium', title: 'ReferenceError: x is not defined' });
-    storeError(error1);
-    storeError(error2);
+    dbStoreError(error1);
+    dbStoreError(error2);
 
     const res = await app.request('/v1/errors/proj_test');
     expect(res.status).toBe(200);
@@ -46,8 +51,8 @@ describe('GET /v1/errors/:projectId', () => {
   });
 
   it('filters by severity', async () => {
-    storeError(makeProcessedError({ severity: 'critical' }));
-    storeError(makeProcessedError({ severity: 'low', title: 'SyntaxError: unexpected token' }));
+    dbStoreError(makeProcessedError({ severity: 'critical' }));
+    dbStoreError(makeProcessedError({ severity: 'low', title: 'SyntaxError: unexpected token' }));
 
     const res = await app.request('/v1/errors/proj_test?severity=critical');
     expect(res.status).toBe(200);
@@ -58,8 +63,8 @@ describe('GET /v1/errors/:projectId', () => {
   });
 
   it('filters by status', async () => {
-    storeError(makeProcessedError({ status: 'open' }));
-    storeError(makeProcessedError({ status: 'resolved', title: 'Resolved error' }));
+    dbStoreError(makeProcessedError({ status: 'open' }));
+    dbStoreError(makeProcessedError({ status: 'resolved', title: 'Resolved error' }));
 
     const res = await app.request('/v1/errors/proj_test?status=all');
     expect(res.status).toBe(200);
@@ -79,8 +84,8 @@ describe('GET /v1/errors/:projectId', () => {
   });
 
   it('defaults to status=open filter', async () => {
-    storeError(makeProcessedError({ status: 'open' }));
-    storeError(makeProcessedError({ status: 'resolved', title: 'Resolved error' }));
+    dbStoreError(makeProcessedError({ status: 'open' }));
+    dbStoreError(makeProcessedError({ status: 'resolved', title: 'Resolved error' }));
 
     const res = await app.request('/v1/errors/proj_test');
     expect(res.status).toBe(200);

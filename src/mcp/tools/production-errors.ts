@@ -68,11 +68,11 @@ export async function handleProductionErrors(
       };
     }
 
-    const data = (await response.json()) as { errors: ProductionError[]; total: number };
+    const data = (await response.json()) as { errors: ProductionError[]; count: number };
 
     return {
       errors: data.errors,
-      total: data.total,
+      total: data.count,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

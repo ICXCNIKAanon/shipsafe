@@ -47,7 +47,7 @@ describe('handleProductionErrors', () => {
 
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ errors: mockErrors, total: 1 }),
+      json: async () => ({ errors: mockErrors, count: 1 }),
     });
 
     const result = await handleProductionErrors({});
@@ -60,7 +60,7 @@ describe('handleProductionErrors', () => {
   it('filters by severity', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ errors: [], total: 0 }),
+      json: async () => ({ errors: [], count: 0 }),
     });
 
     await handleProductionErrors({ severity: 'critical' });
@@ -73,7 +73,7 @@ describe('handleProductionErrors', () => {
   it('filters by status', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ errors: [], total: 0 }),
+      json: async () => ({ errors: [], count: 0 }),
     });
 
     await handleProductionErrors({ status: 'resolved' });
@@ -86,7 +86,7 @@ describe('handleProductionErrors', () => {
   it('defaults to severity=all and status=open', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ errors: [], total: 0 }),
+      json: async () => ({ errors: [], count: 0 }),
     });
 
     await handleProductionErrors({});
@@ -152,7 +152,7 @@ describe('handleProductionErrors', () => {
   it('includes Authorization header when licenseKey is set', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ errors: [], total: 0 }),
+      json: async () => ({ errors: [], count: 0 }),
     });
 
     await handleProductionErrors({});
@@ -172,7 +172,7 @@ describe('handleProductionErrors', () => {
 
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ errors: [], total: 0 }),
+      json: async () => ({ errors: [], count: 0 }),
     });
 
     await handleProductionErrors({});

@@ -1,9 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createDatabase, closeDatabase } from '../../src/db/database.js';
 import { resolveStackFrame } from '../../src/services/sourcemap-resolver.js';
-import { storeSourceMap, clearSourceMapStore } from '../../src/services/sourcemap-store.js';
+import { dbStoreSourceMap } from '../../src/db/sourcemap-repo.js';
 
 beforeEach(() => {
-  clearSourceMapStore();
+  createDatabase(':memory:');
+});
+
+afterEach(() => {
+  closeDatabase();
 });
 
 describe('resolveStackFrame', () => {
@@ -13,7 +18,7 @@ describe('resolveStackFrame', () => {
   });
 
   it('returns original frame for invalid source map JSON (graceful degradation)', () => {
-    storeSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', 'not valid json {{{');
+    dbStoreSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', 'not valid json {{{');
     const result = resolveStackFrame('proj_a', '1.0.0', 'dist/bundle.js', 10, 3);
     expect(result).toEqual({ file: 'dist/bundle.js', line: 10 });
   });
@@ -24,7 +29,7 @@ describe('resolveStackFrame', () => {
       sources: ['src/components/Button.tsx'],
       mappings: 'AAAA',
     });
-    storeSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
+    dbStoreSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
     const result = resolveStackFrame('proj_a', '1.0.0', 'dist/bundle.js', 15, 8);
     expect(result.file).toBe('src/components/Button.tsx');
     expect(result.line).toBe(15);
@@ -40,7 +45,7 @@ describe('resolveStackFrame', () => {
       ],
       mappings: 'AAAA',
     });
-    storeSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
+    dbStoreSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
     const result = resolveStackFrame('proj_a', '1.0.0', 'dist/bundle.js', 22);
     expect(result.file).toBe('src/app.ts');
     expect(result.line).toBe(22);
@@ -52,7 +57,7 @@ describe('resolveStackFrame', () => {
       sources: ['../../src/utils/helpers.ts'],
       mappings: 'AAAA',
     });
-    storeSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
+    dbStoreSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
     const result = resolveStackFrame('proj_a', '1.0.0', 'dist/bundle.js', 7, 1);
     expect(result.file).toBe('src/utils/helpers.ts');
     expect(result.line).toBe(7);
@@ -65,7 +70,7 @@ describe('resolveStackFrame', () => {
       mappings: 'AAAA',
     });
     // Store under the file path itself (no .map suffix)
-    storeSourceMap('proj_a', '1.0.0', 'dist/bundle.js', sourceMap);
+    dbStoreSourceMap('proj_a', '1.0.0', 'dist/bundle.js', sourceMap);
     const result = resolveStackFrame('proj_a', '1.0.0', 'dist/bundle.js', 5);
     expect(result.file).toBe('src/index.ts');
     expect(result.line).toBe(5);
@@ -77,7 +82,7 @@ describe('resolveStackFrame', () => {
       sources: [],
       mappings: '',
     });
-    storeSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
+    dbStoreSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
     const result = resolveStackFrame('proj_a', '1.0.0', 'dist/bundle.js', 3);
     expect(result).toEqual({ file: 'dist/bundle.js', line: 3 });
   });
@@ -88,7 +93,7 @@ describe('resolveStackFrame', () => {
       sources: ['node_modules/lodash/lodash.js', 'node_modules/react/index.js'],
       mappings: 'AAAA',
     });
-    storeSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
+    dbStoreSourceMap('proj_a', '1.0.0', 'dist/bundle.js.map', sourceMap);
     const result = resolveStackFrame('proj_a', '1.0.0', 'dist/bundle.js', 99);
     expect(result).toEqual({ file: 'dist/bundle.js', line: 99 });
   });

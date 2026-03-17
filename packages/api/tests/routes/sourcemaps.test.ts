@@ -1,13 +1,15 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createDatabase, closeDatabase } from '../../src/db/database.js';
 import app from '../../src/index.js';
-import {
-  getSourceMap,
-  clearSourceMapStore,
-} from '../../src/services/sourcemap-store.js';
+import { dbGetSourceMap } from '../../src/db/sourcemap-repo.js';
 
 describe('POST /v1/sourcemaps', () => {
   beforeEach(() => {
-    clearSourceMapStore();
+    createDatabase(':memory:');
+  });
+
+  afterEach(() => {
+    closeDatabase();
   });
 
   it('uploads a single source map and returns 201', async () => {
@@ -32,7 +34,7 @@ describe('POST /v1/sourcemaps', () => {
     expect(json.release).toBe('1.0.0');
 
     // Verify it was actually stored
-    const stored = getSourceMap('proj_abc', '1.0.0', 'dist/main.js');
+    const stored = dbGetSourceMap('proj_abc', '1.0.0', 'dist/main.js');
     expect(stored).toBe('{"version":3,"sources":["main.ts"]}');
   });
 
@@ -103,7 +105,11 @@ describe('POST /v1/sourcemaps', () => {
 
 describe('POST /v1/sourcemaps/batch', () => {
   beforeEach(() => {
-    clearSourceMapStore();
+    createDatabase(':memory:');
+  });
+
+  afterEach(() => {
+    closeDatabase();
   });
 
   it('uploads multiple source maps in batch and returns 201', async () => {
@@ -130,13 +136,13 @@ describe('POST /v1/sourcemaps/batch', () => {
     expect(json.release).toBe('2.0.0');
 
     // Verify all were stored
-    expect(getSourceMap('proj_abc', '2.0.0', 'dist/main.js')).toBe(
+    expect(dbGetSourceMap('proj_abc', '2.0.0', 'dist/main.js')).toBe(
       '{"version":3,"sources":["main.ts"]}',
     );
-    expect(getSourceMap('proj_abc', '2.0.0', 'dist/vendor.js')).toBe(
+    expect(dbGetSourceMap('proj_abc', '2.0.0', 'dist/vendor.js')).toBe(
       '{"version":3,"sources":["vendor.ts"]}',
     );
-    expect(getSourceMap('proj_abc', '2.0.0', 'dist/utils.js')).toBe(
+    expect(dbGetSourceMap('proj_abc', '2.0.0', 'dist/utils.js')).toBe(
       '{"version":3,"sources":["utils.ts"]}',
     );
   });

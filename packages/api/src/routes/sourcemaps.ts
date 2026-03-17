@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import {
-  storeSourceMap,
-} from '../services/sourcemap-store.js';
+  dbStoreSourceMap,
+} from '../db/sourcemap-repo.js';
 
 export const sourcemapRoutes = new Hono();
 
@@ -23,7 +23,7 @@ sourcemapRoutes.post('/sourcemaps', async (c) => {
     return c.json({ error: 'Missing required fields: project_id, release, file_path, source_map' }, 400);
   }
 
-  storeSourceMap(body.project_id, body.release, body.file_path, body.source_map);
+  dbStoreSourceMap(body.project_id, body.release, body.file_path, body.source_map);
 
   return c.json(
     {
@@ -53,7 +53,7 @@ sourcemapRoutes.post('/sourcemaps/batch', async (c) => {
   }
 
   for (const entry of body.source_maps) {
-    storeSourceMap(body.project_id, body.release, entry.file_path, entry.source_map);
+    dbStoreSourceMap(body.project_id, body.release, entry.file_path, entry.source_map);
   }
 
   return c.json(

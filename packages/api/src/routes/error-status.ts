@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getErrors } from '../services/error-store.js';
+import { dbGetErrors } from '../db/error-repo.js';
 
 export const errorStatusRoutes = new Hono();
 
@@ -7,7 +7,7 @@ errorStatusRoutes.get('/errors/:projectId/:errorId/status', (c) => {
   const projectId = c.req.param('projectId');
   const errorId = c.req.param('errorId');
 
-  const allErrors = getErrors(projectId, { status: 'all' });
+  const allErrors = dbGetErrors(projectId, { status: 'all' });
   const error = allErrors.find((e) => e.id === errorId);
 
   if (!error) {

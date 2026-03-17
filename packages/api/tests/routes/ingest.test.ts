@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createDatabase, closeDatabase } from '../../src/db/database.js';
 import app from '../../src/index.js';
-import { clearStore, getAllProjectErrors } from '../../src/services/error-store.js';
+import { dbGetAllProjectErrors } from '../../src/db/error-repo.js';
 import { clearRateLimits } from '../../src/middleware/rate-limit.js';
 
 function makeErrorEvent(overrides: Record<string, unknown> = {}) {
@@ -28,8 +29,12 @@ function makeErrorEvent(overrides: Record<string, unknown> = {}) {
 
 describe('POST /v1/events', () => {
   beforeEach(() => {
-    clearStore();
+    createDatabase(':memory:');
     clearRateLimits();
+  });
+
+  afterEach(() => {
+    closeDatabase();
   });
 
   it('returns 202 with valid error events', async () => {
@@ -72,7 +77,7 @@ describe('POST /v1/events', () => {
       }),
     });
 
-    const stored = getAllProjectErrors('proj_456');
+    const stored = dbGetAllProjectErrors('proj_456');
     expect(stored).toHaveLength(1);
     expect(stored[0].title).toContain('TypeError');
     expect(stored[0].status).toBe('open');
@@ -115,7 +120,7 @@ describe('POST /v1/events', () => {
     expect(body.accepted).toBe(3);
     expect(body.processed).toBe(2); // Only error events are processed
 
-    const stored = getAllProjectErrors('proj_123');
+    const stored = dbGetAllProjectErrors('proj_123');
     expect(stored).toHaveLength(2);
   });
 

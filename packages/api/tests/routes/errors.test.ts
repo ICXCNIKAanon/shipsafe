@@ -94,4 +94,34 @@ describe('GET /v1/errors/:projectId', () => {
     expect(body.count).toBe(1);
     expect(body.errors[0].status).toBe('open');
   });
+
+  it('returns 400 for invalid severity parameter', async () => {
+    const res = await app.request('/v1/errors/proj_test?severity=invalid');
+    expect(res.status).toBe(400);
+
+    const body = await res.json();
+    expect(body.error).toContain('Invalid severity');
+  });
+
+  it('returns 400 for invalid status parameter', async () => {
+    const res = await app.request('/v1/errors/proj_test?status=bogus');
+    expect(res.status).toBe(400);
+
+    const body = await res.json();
+    expect(body.error).toContain('Invalid status');
+  });
+
+  it('accepts all valid severity values', async () => {
+    for (const sev of ['all', 'critical', 'high', 'medium', 'low']) {
+      const res = await app.request(`/v1/errors/proj_test?severity=${sev}`);
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('accepts all valid status values', async () => {
+    for (const status of ['open', 'resolved', 'all']) {
+      const res = await app.request(`/v1/errors/proj_test?status=${status}`);
+      expect(res.status).toBe(200);
+    }
+  });
 });

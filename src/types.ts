@@ -109,3 +109,24 @@ export interface CallSite {
   // For method calls: the object the method is called on
   receiver?: string;
 }
+
+// ── Knowledge Graph: Query result types ──
+
+export interface AttackPath {
+  entryPoint: { name: string; filePath: string; line: number };
+  sink: { name: string; filePath: string; line: number; type: string }; // type: 'database', 'filesystem', 'shell', 'network'
+  path: string[]; // function names in order
+  hasValidation: boolean; // true if any function in path is a known validator
+}
+
+export interface BlastRadiusResult {
+  targetFunction: string;
+  affectedFunctions: Array<{ name: string; filePath: string; line: number }>;
+  affectedEndpoints: Array<{ name: string; filePath: string; line: number }>;
+  totalAffected: number;
+}
+
+export interface MissingAuthResult {
+  endpoint: { name: string; filePath: string; line: number };
+  reason: string; // e.g., "No auth middleware in call chain"
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@shipsafe/monitor",
+  "version": "0.1.0",
+  "description": "Lightweight error capture and performance monitoring for ShipSafe",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./node": "./dist/node/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": ["monitoring", "error-tracking", "performance"],
+  "author": "Connect Holdings LLC",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@types/node": "^22.0.0"
+  }
+}

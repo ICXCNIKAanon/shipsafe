@@ -70,14 +70,27 @@ Marketing landing page for shipsafe.org. Single-page, Shuttle.dev-level polish w
 
 ### 3. Terminal Mockup
 - macOS-style window chrome (red/yellow/green dots)
-- Shows `$ shipsafe scan` output with syntax coloring
-- **Animation:** Typewriter effect — lines appear sequentially with realistic timing. Cursor blinks, then command types out, then results appear line by line.
 - Frosted glass background with gold border glow
 - Positioned to overlap hero/next section slightly (negative margin)
+- **Terminal content (exact copy):**
+  ```
+  $ shipsafe scan                           [typed, 0.0-1.0s]
+                                            [pause 0.3s]
+  Scanning 847 files...                     [fade in, dim]
+                                            [pause 0.8s]
+  ✓ Pattern engine — 0 secrets, 0 vulns     [fade in, green ✓]
+  ✓ Knowledge graph — 0 attack paths        [fade in, 0.2s delay]
+  ✓ Taint analysis — 0 unsanitized flows    [fade in, 0.2s delay]
+                                            [pause 0.4s]
+  Score: A | 0 findings | 1.2s              [fade in, gold "A"]
+  Smooth sailing. Ship it. ⛵                [fade in, green]
+  ```
+- **Animation:** Typewriter effect — command types character-by-character, then results appear line-by-line with delays as noted above. Blinking cursor throughout. Total sequence: ~4 seconds. Triggers when terminal scrolls into view (`whileInView`).
 
 ### 4. Social Proof Bar
 - "Trusted by teams shipping fast" label
-- 5 logo placeholders (replace with real logos when available)
+- 5 placeholder company names in monochrome cream at 35% opacity (e.g., "ACME", "TERRAFORM", "SHIPYARD", "HARBOR", "CLOUDFLEET")
+- When real logos available: white/monochrome SVGs, max height 24px, all same visual weight
 - Thin gold border separators top/bottom
 - **Animation:** Logos fade in with stagger on scroll into view
 
@@ -101,10 +114,10 @@ Marketing landing page for shipsafe.org. Single-page, Shuttle.dev-level polish w
 - **Animation:** Steps reveal left-to-right on scroll
 
 ### 7. Pricing (3-column)
-- FREE ($0) / PRO ($19/mo, featured) / TEAM ($49/mo)
 - Gold "Most Popular" badge on PRO
-- Feature lists with gold checkmarks
-- CTAs: "Get Started Free" / "Start Pro Trial" (gold) / "Contact Sales"
+- **FREE ($0/mo):** Pattern scanning (Semgrep, Gitleaks, Trivy) · 1 project · Pre-commit hooks · Community support → "Get Started Free"
+- **PRO ($19/mo, featured):** Everything in Free · Knowledge graph engine · Auto-fix (--fix) · Production monitoring · MCP server for AI assistants · 5 projects → "Start Pro Trial" (gold CTA)
+- **TEAM ($49/mo):** Everything in Pro · GitHub App (PR scanning) · Source map upload · 20 projects · Priority support → "Contact Sales"
 - **Animation:** Cards scale up from 0.95 on scroll into view, staggered
 
 ### 8. Final CTA
@@ -154,22 +167,57 @@ const navBg = useTransform(scrollY, [0, 100], ["rgba(5,10,24,0)", "rgba(5,10,24,
 
 ---
 
+## Accessibility
+
+### `prefers-reduced-motion`
+- Wrap all Framer Motion animations in `useReducedMotion()` check
+- When reduced motion: all `whileInView` animations show instantly (no transition), star twinkle disabled (static opacity), sailboat bob disabled, typewriter shows all lines at once, parallax disabled (elements at rest position)
+- Water shimmer reduced to static gradient
+
+### Keyboard & Screen Reader
+- All interactive elements focusable with visible focus rings (gold outline)
+- Semantic HTML: `<nav>`, `<main>`, `<section>`, `<footer>`
+- Skip-to-content link hidden until focused
+- Terminal mockup uses `aria-label="ShipSafe scan output example"`
+- Pricing cards use proper heading hierarchy
+
+---
+
 ## Responsive Breakpoints
 
 | Breakpoint | Layout Changes |
 |------------|---------------|
 | Desktop (1024px+) | Full layout as designed |
-| Tablet (768-1023px) | Features 2-column, pricing stacks, hero text smaller |
-| Mobile (<768px) | Single column everything, nav becomes hamburger, hero 36px, terminal full-width |
+| Tablet (768-1023px) | Features 2-column, pricing stacks, hero text 48px, scene scales proportionally |
+| Mobile (<768px) | Single column, hamburger nav, hero 36px, terminal full-width, scene simplified |
+
+### Mobile Nav (< 768px)
+- Hamburger icon (3 lines) replaces link list
+- Opens full-screen overlay (navy-deep background, 100vh)
+- Links stacked vertically, centered, 18px, 48px tap targets
+- "Install Free" CTA at bottom of overlay
+- Close on link click, close button (X), or scroll
+- Framer Motion `AnimatePresence` for slide-down enter / slide-up exit
+
+### Mobile Scene Behavior
+- Stars: reduced count (6 instead of 12), no parallax
+- Moon: static position (no parallax), slightly smaller
+- Palm silhouette: hidden on mobile (< 768px) — too much visual noise at small sizes
+- Sailboat: centered below text, bob animation kept, no parallax
+- Water: reduced height, shimmer kept
+
+### How It Works — Mobile
+- Vertical layout, connecting line becomes vertical bar on left
+- Steps stack vertically with step numbers aligned to the bar
 
 ---
 
 ## Tech Stack
 
 - **Framework:** Next.js 15 (App Router, static export)
-- **Styling:** Tailwind CSS 4
+- **Styling:** Tailwind CSS 3.4 (stable config-file-based setup)
 - **Animations:** Framer Motion 11
-- **Fonts:** Google Fonts (Inter + Playfair Display)
+- **Fonts:** `next/font/google` for Inter + Playfair Display (self-hosted, zero layout shift, `font-display: swap`)
 - **Hosting:** Vercel (or static export to any CDN)
 - **Repo:** Separate repo (`jakewlittle-cs/shipsafe-site`, private)
 
@@ -182,6 +230,8 @@ shipsafe-site/
 ├── app/
 │   ├── layout.tsx          # Root layout, fonts, metadata
 │   ├── page.tsx            # Landing page (imports sections)
+│   ├── not-found.tsx       # 404 page (tropical night theme, "Lost at sea?")
+│   ├── opengraph-image.tsx # Dynamic OG image via @vercel/og
 │   └── globals.css         # Tailwind base + custom animations
 ├── components/
 │   ├── nav.tsx             # Fixed navigation
@@ -209,5 +259,18 @@ shipsafe-site/
 
 - Title: "ShipSafe — Security for Vibe Coders"
 - Description: "One-command security scanning, auto-fix, and production monitoring. Ship code you trust."
-- OG image: Hero scene rendered as static PNG (1200x630)
+- OG image: Generated via `@vercel/og` at `/app/opengraph-image.tsx` — navy background, gold sailboat mark, headline text, 1200x630
 - Structured data: SoftwareApplication schema
+
+---
+
+## 404 Page
+
+"Lost at sea?" headline in serif, sailboat illustration, "Back to shore →" CTA linking to `/`. Same tropical night background, minimal — just the message and a way home.
+
+---
+
+## Notes
+
+- This spec lives in the CLI repo for now. It will be copied to `shipsafe-site` repo when scaffolded.
+- Pricing is subject to change before launch — the feature gates match what's already enforced in the CLI (`src/cli/license-gate.ts`).

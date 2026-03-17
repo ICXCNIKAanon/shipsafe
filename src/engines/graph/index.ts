@@ -11,6 +11,7 @@ import {
   findMissingAuth,
   queryResultsToFindings,
 } from './queries.js';
+import { findDataFlows } from './data-flow.js';
 
 // ── Public types ──
 
@@ -84,10 +85,33 @@ export async function runGraphEngine(options: {
 
     const missingAuth = await findMissingAuth(store);
 
-    // 7. Convert results to findings
+    // 7. Convert query results to findings
     const findings = queryResultsToFindings(attackPaths, blastRadiusResults, missingAuth);
 
-    // 8. Return findings with stats and timing
+    // 8. Run data flow taint analysis and add tainted_data_flow findings
+    const dataFlows = await findDataFlows(store);
+    let dfIdCounter = 0;
+    for (const flow of dataFlows) {
+      if (flow.hasSanitization) continue; // sanitized flows are not findings
+
+      dfIdCounter++;
+      const severity =
+        flow.sink.type === 'shell' || flow.sink.type === 'eval' ? 'critical' : 'high';
+
+      findings.push({
+        id: `kg-tainted-flow-${dfIdCounter}`,
+        engine: 'knowledge_graph',
+        severity,
+        type: 'tainted_data_flow',
+        file: flow.source.filePath,
+        line: flow.source.line,
+        description: `Tainted data flows from ${flow.source.name} (${flow.source.type}) to ${flow.sink.name} (${flow.sink.type} sink): ${flow.path.join(' -> ')}`,
+        fix_suggestion: `Add input sanitization or parameterization between ${flow.source.name} and ${flow.sink.name}`,
+        auto_fixable: false,
+      });
+    }
+
+    // 9. Return findings with stats and timing
     return {
       findings,
       stats: {
@@ -100,7 +124,7 @@ export async function runGraphEngine(options: {
       duration_ms: Date.now() - startTime,
     };
   } finally {
-    // 9. Clean up (close graph store and remove temp directory)
+    // 10. Clean up (close graph store and remove temp directory)
     await store.close();
     try {
       await rm(tmpDir, { recursive: true, force: true });

@@ -1,7 +1,7 @@
 import type { ShipSafeConfig, ShipSafeEvent } from './types.js';
 import { scrubEvent } from './scrubber.js';
 
-const DEFAULT_ENDPOINT = 'https://ingest.shipsafe.org/v1/events';
+const DEFAULT_ENDPOINT = 'https://shipsafe-m9nc6.ondigitalocean.app/v1/ingest';
 const FLUSH_INTERVAL_MS = 5000;
 const BATCH_SIZE = 10;
 const MAX_QUEUE_SIZE = 100;

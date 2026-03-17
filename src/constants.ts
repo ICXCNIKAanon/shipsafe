@@ -5,7 +5,7 @@ export const CLAUDE_MD_START = '<!-- shipsafe:start -->';
 export const CLAUDE_MD_END = '<!-- shipsafe:end -->';
 export const VERSION = '0.1.0';
 export const HOOK_MARKER = '# SHIPSAFE_HOOK';
-export const DEFAULT_API_URL = 'http://localhost:3747';
+export const DEFAULT_API_URL = 'https://shipsafe-m9nc6.ondigitalocean.app';
 
 export const EXIT_CODES = {
   SUCCESS: 0,

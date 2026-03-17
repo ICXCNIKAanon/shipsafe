@@ -1,6 +1,6 @@
 {
-  "name": "shipsafe",
-  "version": "0.1.0",
+  "name": "@shipsafe/cli",
+  "version": "0.1.1",
   "description": "Full-lifecycle security and reliability platform for vibe coders",
   "type": "module",
   "bin": {

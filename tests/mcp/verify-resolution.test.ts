@@ -122,7 +122,7 @@ describe('handleVerifyResolution', () => {
     expect(result.status).toBe('resolved');
     const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0];
     const url = fetchCall[0] as string;
-    expect(url).toContain('localhost:3747');
+    expect(url).toContain('shipsafe-m9nc6.ondigitalocean.app');
   });
 
   it('includes Authorization header when licenseKey is set', async () => {

@@ -144,7 +144,7 @@ describe('handleProductionErrors', () => {
     // Should have used default endpoint
     const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0];
     const url = fetchCall[0] as string;
-    expect(url).toContain('localhost:3747');
+    expect(url).toContain('shipsafe-m9nc6.ondigitalocean.app');
   });
 
   it('returns warning when API returns non-OK response', async () => {

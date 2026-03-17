@@ -43,7 +43,7 @@ ingestRoutes.post('/events', projectAuth, rateLimiter(), async (c) => {
 
       // Enrich new errors with source map resolution when release info is present
       if (processed.occurrences === 1 && event.release) {
-        const resolved = resolveStackFrame(projectId, event.release, processed.file, processed.line);
+        const resolved = await resolveStackFrame(projectId, event.release, processed.file, processed.line);
         processed.file = resolved.file;
         processed.line = resolved.line;
       }

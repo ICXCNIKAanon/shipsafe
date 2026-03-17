@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { dbGetErrors } from '../db/error-repo.js';
+import { dbGetErrors, dbResolveError } from '../db/error-repo.js';
 
 export const errorStatusRoutes = new Hono();
 
@@ -28,4 +28,16 @@ errorStatusRoutes.get('/errors/:projectId/:errorId/status', (c) => {
     hours_since_last: hoursSinceLast,
     confidence,
   });
+});
+
+errorStatusRoutes.post('/errors/:projectId/:errorId/resolve', (c) => {
+  const errorId = c.req.param('errorId');
+
+  const resolved = dbResolveError(errorId);
+
+  if (!resolved) {
+    return c.json({ error: 'Error not found' }, 404);
+  }
+
+  return c.json({ resolved: true, error_id: errorId });
 });

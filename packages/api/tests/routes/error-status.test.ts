@@ -73,3 +73,43 @@ describe('GET /v1/errors/:projectId/:errorId/status', () => {
     expect(body.error).toBe('Error not found');
   });
 });
+
+describe('POST /v1/errors/:projectId/:errorId/resolve', () => {
+  beforeEach(() => {
+    createDatabase(':memory:');
+  });
+
+  afterEach(() => {
+    closeDatabase();
+  });
+
+  it('resolves an open error and returns 200', async () => {
+    const error = makeProcessedError({ status: 'open' });
+    dbStoreError(error);
+
+    const res = await app.request(`/v1/errors/proj_test/${error.id}/resolve`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.resolved).toBe(true);
+    expect(body.error_id).toBe(error.id);
+
+    // Verify GET status now shows resolved
+    const statusRes = await app.request(`/v1/errors/proj_test/${error.id}/status`);
+    expect(statusRes.status).toBe(200);
+    const statusBody = await statusRes.json();
+    expect(statusBody.status).toBe('resolved');
+  });
+
+  it('returns 404 when resolving an unknown error', async () => {
+    const res = await app.request('/v1/errors/proj_test/non-existent-id/resolve', {
+      method: 'POST',
+    });
+    expect(res.status).toBe(404);
+
+    const body = await res.json();
+    expect(body.error).toBe('Error not found');
+  });
+});

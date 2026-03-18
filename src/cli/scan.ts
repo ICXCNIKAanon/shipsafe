@@ -1,9 +1,11 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import type { ScanResult, ScanScope, Severity } from '../types.js';
-import { runPatternEngine } from '../engines/pattern/index.js';
+import { runPatternEngine, getAvailableScanners } from '../engines/pattern/index.js';
+import { isGraphEngineAvailable } from '../engines/graph/index.js';
 import { fixHardcodedSecret } from '../autofix/secret-fixer.js';
 import { gateFeature } from './license-gate.js';
+import { checkLicense } from './license-check.js';
 
 export interface ScanOptions {
   scope: string;
@@ -23,30 +25,64 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function formatResults(result: ScanResult): void {
-  console.log(chalk.bold('\nShipSafe Scan Results'));
-  console.log(chalk.bold('─'.repeat(40)));
+async function formatResults(result: ScanResult): Promise<void> {
+  const scanners = await getAvailableScanners();
+  const graphAvailable = isGraphEngineAvailable();
+  const license = await checkLicense();
 
+  console.log('');
+  console.log(chalk.bold('  ShipSafe Scan Results'));
+  console.log(chalk.dim('  ' + '─'.repeat(44)));
+  console.log('');
+
+  // Show what engines ran
+  const check = chalk.green('✓');
+  const cross = chalk.dim('✗');
+
+  console.log(chalk.dim('  Engines:'));
+  console.log(`    ${scanners.semgrep ? check : cross} Semgrep ${scanners.semgrep ? '' : chalk.dim('(not installed)')}`);
+  console.log(`    ${scanners.gitleaks ? check : cross} Gitleaks ${scanners.gitleaks ? '' : chalk.dim('(not installed)')}`);
+  console.log(`    ${scanners.trivy ? check : cross} Trivy ${scanners.trivy ? '' : chalk.dim('(not installed)')}`);
+  console.log(`    ${graphAvailable ? check : cross} Knowledge Graph ${graphAvailable ? '' : chalk.dim('(requires native deps)')}`);
+  console.log('');
+
+  if (!scanners.semgrep && !scanners.gitleaks && !scanners.trivy) {
+    console.log(chalk.yellow('  ⚠ No scanners installed. Install for deeper analysis:'));
+    console.log(chalk.dim('    brew install semgrep'));
+    console.log(chalk.dim('    brew install gitleaks'));
+    console.log(chalk.dim('    brew install trivy'));
+    console.log('');
+  }
+
+  // Score
   const duration = formatDuration(result.scan_duration_ms);
-  const scoreLine = `Score: ${result.score} | ${result.findings.length} findings | ${duration}`;
-  console.log(scoreLine);
+  const scoreColor = result.score === 'A' ? chalk.green : result.score === 'B' ? chalk.yellow : chalk.red;
+  console.log(`  Score: ${scoreColor(chalk.bold(result.score))}  |  ${result.findings.length} findings  |  ${chalk.dim(duration)}`);
+  console.log(`  Tier:  ${chalk.dim(license.tier)}`);
+  console.log('');
 
+  // Findings
   if (result.findings.length > 0) {
+    console.log(chalk.dim('  ' + '─'.repeat(44)));
     console.log('');
     for (const finding of result.findings) {
       const colorFn = SEVERITY_COLORS[finding.severity];
-      const severityLabel = colorFn(finding.severity.toUpperCase());
-      console.log(`${severityLabel}  ${finding.file}:${finding.line}`);
+      const severityLabel = colorFn(finding.severity.toUpperCase().padEnd(8));
+      console.log(`  ${severityLabel} ${chalk.dim(finding.file + ':' + finding.line)}`);
       console.log(`  ${finding.description}`);
-      console.log(`  Fix: ${finding.fix_suggestion}`);
+      console.log(`  ${chalk.dim('Fix:')} ${finding.fix_suggestion}`);
+      console.log('');
     }
+  } else {
+    console.log(chalk.green('  ✓ No vulnerabilities found. Smooth sailing.'));
+    console.log('');
   }
-
-  console.log('');
 }
 
 export async function handleScanAction(options: ScanOptions): Promise<void> {
   const scope = options.scope as ScanScope;
+
+  console.log(chalk.dim(`\n  Scanning ${scope === 'staged' ? 'staged files' : 'all files'}...`));
 
   const result = await runPatternEngine({
     targetPath: process.cwd(),
@@ -70,7 +106,7 @@ export async function handleScanAction(options: ScanOptions): Promise<void> {
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
-    formatResults(result);
+    await formatResults(result);
   }
 
   const hasCriticalOrHigh = result.findings.some(

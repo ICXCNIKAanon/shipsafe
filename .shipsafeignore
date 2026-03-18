@@ -1,0 +1,5 @@
+# ShipSafe's own detection rules contain patterns that look like vulnerabilities.
+# This is expected — the scanner's regex patterns match the things they detect.
+src/engines/builtin/patterns.ts
+src/engines/builtin/secrets.ts
+tests/

@@ -7,8 +7,9 @@
  */
 
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, extname, relative, basename } from 'node:path';
+import { join, extname, relative, basename, resolve } from 'node:path';
 import type { Finding, Severity } from '../../types.js';
+import { loadIgnoreFilter } from './ignore.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -2059,15 +2060,19 @@ export async function scanSecrets(
   files?: string[],
 ): Promise<Finding[]> {
   // 1. Determine file list
-  let filesToScan: string[];
+  let discovered: string[];
   if (files && files.length > 0) {
     // Map relative paths to absolute
-    filesToScan = files.map((f) =>
+    discovered = files.map((f) =>
       f.startsWith('/') ? f : join(targetPath, f),
     );
   } else {
-    filesToScan = await walkDirectory(targetPath);
+    discovered = await walkDirectory(targetPath);
   }
+
+  // Apply .shipsafeignore filter
+  const ignoreFilter = await loadIgnoreFilter(resolve(targetPath));
+  const filesToScan = discovered.filter((f) => !ignoreFilter.isIgnored(f));
 
   // 2. Scan all files concurrently in controlled batches
   const findings: Finding[] = [];

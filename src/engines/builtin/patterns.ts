@@ -8,6 +8,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join, relative, resolve } from 'node:path';
 import type { Finding, Severity } from '../../types.js';
+import { loadIgnoreFilter, type IgnoreFilter } from './ignore.js';
 
 // ── Types ──
 
@@ -1659,7 +1660,12 @@ export async function scanPatterns(
   targetPath: string,
   files?: string[],
 ): Promise<Finding[]> {
-  const filesToScan = files ?? (await discoverFiles(targetPath));
+  const discovered = files ?? (await discoverFiles(targetPath));
+
+  // Apply .shipsafeignore filter
+  const ignoreFilter = await loadIgnoreFilter(resolve(targetPath));
+  const filesToScan = discovered.filter((f) => !ignoreFilter.isIgnored(f));
+
   const allFindings: Finding[] = [];
 
   // Process files in parallel batches for performance

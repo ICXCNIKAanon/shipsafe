@@ -18,9 +18,10 @@ export async function startMcpServer(): Promise<void> {
   // Register shipsafe_scan tool
   server.tool(
     'shipsafe_scan',
-    'Run security scan on the current project. Checks for vulnerabilities, hardcoded secrets, and dependency CVEs.',
+    'Run security scan on a project directory. Checks for vulnerabilities, hardcoded secrets, and dependency CVEs. IMPORTANT: Always pass the project path.',
     {
-      scope: z.string().optional().describe('Scan scope: staged (default), all, or file:<path>'),
+      path: z.string().optional().describe('Absolute path to the project directory to scan (e.g. /Users/jake/my-project). Defaults to cwd.'),
+      scope: z.string().optional().describe('Scan scope: all (default), staged, or file:<path>'),
       fix: z.boolean().optional().describe('Attempt auto-fix (default: false)'),
     },
     async (params) => {

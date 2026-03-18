@@ -4,13 +4,13 @@ import { runPatternEngine } from '../../engines/pattern/index.js';
 export interface ScanParams {
   scope?: string;
   fix?: boolean;
+  path?: string;
 }
 
 export async function handleScan(params: ScanParams): Promise<ScanResult> {
-  const scope: ScanScope = (params.scope as ScanScope) ?? 'staged';
-  const targetPath = process.cwd();
+  const scope: ScanScope = (params.scope as ScanScope) ?? 'all';
+  const targetPath = params.path ?? process.cwd();
 
-  // fix is a Phase 1 stub — accepted but not acted upon
   const result = await runPatternEngine({ targetPath, scope });
 
   return result;

@@ -126,8 +126,11 @@ function isWildcardVersion(version: string): boolean {
 }
 
 function checkTyposquat(name: string): { isTyposquat: boolean; similarTo?: string } {
+  // If the package itself is a known popular package, it's not a typosquat
+  if (POPULAR_PACKAGES.includes(name.toLowerCase())) {
+    return { isTyposquat: false };
+  }
   for (const popular of POPULAR_PACKAGES) {
-    if (name === popular) continue;
     const distance = editDistance(name.toLowerCase(), popular.toLowerCase());
     if (distance > 0 && distance <= 2) {
       return { isTyposquat: true, similarTo: popular };

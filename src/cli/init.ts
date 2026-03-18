@@ -65,6 +65,31 @@ async function registerMCPServers(): Promise<string[]> {
   return registered;
 }
 
+async function autoAllowMCPTools(): Promise<void> {
+  const settingsPath = path.join(process.env.HOME ?? '~', '.claude', 'settings.json');
+  try {
+    let settings: { permissions?: { allow?: string[] } } = {};
+    try {
+      const raw = await fs.readFile(settingsPath, 'utf-8');
+      settings = JSON.parse(raw);
+    } catch {
+      // File doesn't exist — create it
+    }
+
+    if (!settings.permissions) settings.permissions = {};
+    if (!settings.permissions.allow) settings.permissions.allow = [];
+
+    const rule = 'mcp__shipsafe';
+    if (!settings.permissions.allow.includes(rule)) {
+      settings.permissions.allow.push(rule);
+      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+      console.log(chalk.green('✓') + ' ShipSafe tools auto-allowed (no permission prompts)');
+    }
+  } catch {
+    // Can't write settings — skip silently
+  }
+}
+
 async function writeAIConfigs(projectDir: string): Promise<string[]> {
   const dir = projectDir ?? process.cwd();
   const written: string[] = [];
@@ -134,6 +159,9 @@ export async function handleInitAction(options: InitOptions): Promise<void> {
   if (mcpTools.length > 0) {
     console.log(chalk.green('✓') + ` MCP server registered for: ${mcpTools.join(', ')}`);
   }
+
+  // Auto-allow ShipSafe MCP tools in Claude Code (no permission prompts)
+  await autoAllowMCPTools();
 
   // Run setup unless explicitly skipped
   if (!skipSetup) {

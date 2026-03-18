@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { loadProjectConfig, saveProjectConfig } from '../config/manager.js';
 import { handleSetupAction } from './setup.js';
+
+const execFileAsync = promisify(execFile);
 
 export interface InitOptions {
   projectDir?: string;
@@ -35,6 +39,31 @@ const AI_CONFIG_FILES: Array<{
   { filename: '.github/copilot-instructions.md', tool: 'GitHub Copilot' },
   { filename: '.clinerules', tool: 'Cline' },
 ];
+
+async function registerMCPServers(): Promise<string[]> {
+  const registered: string[] = [];
+  const shipsafePath = process.argv[1]?.replace(/\/bin\/shipsafe\.(js|ts)$/, '/bin/shipsafe.js')
+    || '/usr/local/bin/shipsafe';
+
+  // Try to find the actual shipsafe binary
+  let binPath = '/usr/local/bin/shipsafe';
+  try {
+    const { stdout } = await execFileAsync('which', ['shipsafe']);
+    binPath = stdout.trim();
+  } catch {
+    // Fall back to default
+  }
+
+  // Register with Claude Code
+  try {
+    await execFileAsync('claude', ['mcp', 'add', 'shipsafe', binPath, 'mcp-server']);
+    registered.push('Claude Code');
+  } catch {
+    // Claude CLI not installed — skip silently
+  }
+
+  return registered;
+}
 
 async function writeAIConfigs(projectDir: string): Promise<string[]> {
   const dir = projectDir ?? process.cwd();
@@ -85,20 +114,14 @@ export async function handleInitAction(options: InitOptions): Promise<void> {
   // Load existing config to check for an existing projectId
   const existingConfig = await loadProjectConfig(projectDir);
 
-  if (existingConfig.projectId) {
-    console.warn(
-      chalk.yellow('⚠') +
-        ` ShipSafe is already initialized (projectId: ${existingConfig.projectId}). Skipping config creation.`,
-    );
-    return;
+  let projectId = existingConfig.projectId;
+  if (projectId) {
+    console.log(chalk.dim('  Project already initialized (projectId: ' + projectId + ')'));
+  } else {
+    projectId = `proj_${randomUUID().slice(0, 12)}`;
+    await saveProjectConfig({ projectId }, projectDir);
+    console.log(chalk.green('✓') + ` Created shipsafe.config.json (projectId: ${projectId})`);
   }
-
-  // Generate a new project ID
-  const projectId = `proj_${randomUUID().slice(0, 12)}`;
-
-  // Write the project config
-  await saveProjectConfig({ projectId }, projectDir);
-  console.log(chalk.green('✓') + ` Created shipsafe.config.json (projectId: ${projectId})`);
 
   // Write AI assistant config files
   const aiTools = await writeAIConfigs(projectDir ?? process.cwd());
@@ -106,19 +129,23 @@ export async function handleInitAction(options: InitOptions): Promise<void> {
     console.log(chalk.green('✓') + ` AI security rules added for: ${aiTools.join(', ')}`);
   }
 
+  // Register MCP server with AI coding tools
+  const mcpTools = await registerMCPServers();
+  if (mcpTools.length > 0) {
+    console.log(chalk.green('✓') + ` MCP server registered for: ${mcpTools.join(', ')}`);
+  }
+
   // Run setup unless explicitly skipped
   if (!skipSetup) {
     await handleSetupAction({});
   }
 
-  // Print getting-started instructions
   console.log('');
-  console.log(chalk.bold('ShipSafe initialized! Next steps:'));
-  console.log('  1. Run ' + chalk.cyan('shipsafe scan') + ' to run your first security scan');
-  console.log('  2. Your AI assistant will now auto-scan for security issues');
-  console.log(
-    '  3. Run ' + chalk.cyan('shipsafe activate') + ' to unlock full scanning with a license key',
-  );
+  console.log(chalk.green.bold('  ShipSafe is ready.'));
+  console.log('');
+  console.log('  Your AI assistant will now auto-scan for security issues.');
+  console.log('  Run ' + chalk.cyan('shipsafe scan') + ' anytime for a manual scan.');
+  console.log('');
 }
 
 export function registerInitCommand(program: Command): void {

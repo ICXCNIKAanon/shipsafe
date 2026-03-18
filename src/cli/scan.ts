@@ -30,29 +30,31 @@ async function formatResults(result: ScanResult): Promise<void> {
   const graphAvailable = isGraphEngineAvailable();
   const license = await checkLicense();
 
+  // Get built-in engine stats
+  const { getSecretPatternCount } = await import('../engines/builtin/secrets.js');
+  const { getPatternRuleCount } = await import('../engines/builtin/patterns.js');
+
   console.log('');
   console.log(chalk.bold('  ShipSafe Scan Results'));
   console.log(chalk.dim('  ' + '─'.repeat(44)));
   console.log('');
 
-  // Show what engines ran
   const check = chalk.green('✓');
   const cross = chalk.dim('✗');
 
-  console.log(chalk.dim('  Engines:'));
-  console.log(`    ${scanners.semgrep ? check : cross} Semgrep ${scanners.semgrep ? '' : chalk.dim('(not installed)')}`);
-  console.log(`    ${scanners.gitleaks ? check : cross} Gitleaks ${scanners.gitleaks ? '' : chalk.dim('(not installed)')}`);
-  console.log(`    ${scanners.trivy ? check : cross} Trivy ${scanners.trivy ? '' : chalk.dim('(not installed)')}`);
-  console.log(`    ${graphAvailable ? check : cross} Knowledge Graph ${graphAvailable ? '' : chalk.dim('(requires native deps)')}`);
-  console.log('');
+  console.log(chalk.dim('  Built-in Engines:'));
+  console.log(`    ${check} Secret Scanner ${chalk.dim(`(${getSecretPatternCount()} patterns)`)}`);
+  console.log(`    ${check} Vulnerability Scanner ${chalk.dim(`(${getPatternRuleCount()} rules)`)}`);
+  console.log(`    ${check} Dependency Auditor`);
+  console.log(`    ${graphAvailable ? check : cross} Knowledge Graph`);
 
-  if (!scanners.semgrep && !scanners.gitleaks && !scanners.trivy) {
-    console.log(chalk.yellow('  ⚠ No scanners installed. Install for deeper analysis:'));
-    console.log(chalk.dim('    brew install semgrep'));
-    console.log(chalk.dim('    brew install gitleaks'));
-    console.log(chalk.dim('    brew install trivy'));
-    console.log('');
+  if (scanners.semgrep || scanners.gitleaks || scanners.trivy) {
+    console.log(chalk.dim('  External (bonus):'));
+    if (scanners.semgrep) console.log(`    ${check} Semgrep`);
+    if (scanners.gitleaks) console.log(`    ${check} Gitleaks`);
+    if (scanners.trivy) console.log(`    ${check} Trivy`);
   }
+  console.log('');
 
   // Score
   const duration = formatDuration(result.scan_duration_ms);
@@ -82,7 +84,9 @@ async function formatResults(result: ScanResult): Promise<void> {
 export async function handleScanAction(options: ScanOptions): Promise<void> {
   const scope = options.scope as ScanScope;
 
-  console.log(chalk.dim(`\n  Scanning ${scope === 'staged' ? 'staged files' : 'all files'}...`));
+  if (!options.json) {
+    console.log(chalk.dim(`\n  Scanning ${scope === 'staged' ? 'staged files' : 'all files'}...`));
+  }
 
   const result = await runPatternEngine({
     targetPath: process.cwd(),

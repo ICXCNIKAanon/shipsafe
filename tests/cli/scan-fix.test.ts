@@ -4,6 +4,7 @@ import type { ScanResult, Finding } from '../../src/types.js';
 // Mock modules before importing the module under test
 vi.mock('../../src/engines/pattern/index.js', () => ({
   runPatternEngine: vi.fn(),
+  getAvailableScanners: vi.fn().mockResolvedValue({ semgrep: false, gitleaks: false, trivy: false }),
 }));
 
 vi.mock('../../src/autofix/secret-fixer.js', () => ({
@@ -12,6 +13,22 @@ vi.mock('../../src/autofix/secret-fixer.js', () => ({
 
 vi.mock('../../src/cli/license-gate.js', () => ({
   gateFeature: vi.fn().mockResolvedValue({ allowed: true, tier: 'pro' }),
+}));
+
+vi.mock('../../src/engines/graph/index.js', () => ({
+  isGraphEngineAvailable: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('../../src/cli/license-check.js', () => ({
+  checkLicense: vi.fn().mockResolvedValue({ valid: true, tier: 'pro' }),
+}));
+
+vi.mock('../../src/engines/builtin/secrets.js', () => ({
+  getSecretPatternCount: vi.fn().mockReturnValue(174),
+}));
+
+vi.mock('../../src/engines/builtin/patterns.js', () => ({
+  getPatternRuleCount: vi.fn().mockReturnValue(44),
 }));
 
 // Mock chalk to return plain strings for testability

@@ -4,6 +4,23 @@ import type { ScanResult, Finding } from '../../src/types.js';
 // Mock the pattern engine before importing
 vi.mock('../../src/engines/pattern/index.js', () => ({
   runPatternEngine: vi.fn(),
+  getAvailableScanners: vi.fn().mockResolvedValue({ semgrep: false, gitleaks: false, trivy: false }),
+}));
+
+vi.mock('../../src/engines/graph/index.js', () => ({
+  isGraphEngineAvailable: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('../../src/cli/license-check.js', () => ({
+  checkLicense: vi.fn().mockResolvedValue({ valid: true, tier: 'free' }),
+}));
+
+vi.mock('../../src/engines/builtin/secrets.js', () => ({
+  getSecretPatternCount: vi.fn().mockReturnValue(174),
+}));
+
+vi.mock('../../src/engines/builtin/patterns.js', () => ({
+  getPatternRuleCount: vi.fn().mockReturnValue(44),
 }));
 
 // Mock chalk to return plain strings for testability

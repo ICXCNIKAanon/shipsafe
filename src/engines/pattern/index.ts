@@ -76,9 +76,18 @@ export async function runPatternEngine(options: PatternEngineOptions): Promise<S
     };
   }
 
-  // 4. Run all available scanners in parallel with Promise.allSettled()
-  const scannerPromises: Promise<Finding[]>[] = [];
+  // 4. Run built-in scanners (always available — no external deps)
+  const { scanSecrets } = await import('../builtin/secrets.js');
+  const { scanPatterns } = await import('../builtin/patterns.js');
+  const { scanDependencies } = await import('../builtin/dependencies.js');
 
+  const scannerPromises: Promise<Finding[]>[] = [
+    scanSecrets(targetPath, stagedFiles),
+    scanPatterns(targetPath, stagedFiles),
+    scanDependencies(targetPath),
+  ];
+
+  // 4b. Also run external scanners if installed (additive — more coverage)
   if (availability.semgrep) {
     scannerPromises.push(runSemgrep(targetPath, stagedFiles));
   }
@@ -97,16 +106,28 @@ export async function runPatternEngine(options: PatternEngineOptions): Promise<S
     if (result.status === 'fulfilled') {
       findings.push(...result.value);
     }
-    // Rejected promises are silently skipped (scanner failure is non-fatal)
   }
 
-  // 5b. Run graph engine (optional — failures are non-fatal)
+  // 5b. Deduplicate findings (built-in + external may find same issue)
+  const seen = new Set<string>();
+  const deduped: Finding[] = [];
+  for (const f of findings) {
+    const key = `${f.file}:${f.line}:${f.type}:${f.description}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(f);
+    }
+  }
+  findings.length = 0;
+  findings.push(...deduped);
+
+  // 5c. Run graph engine (optional — failures are non-fatal)
   if (isGraphEngineAvailable()) {
     try {
       const graphResult = await runGraphEngine({ targetPath, scope });
       findings.push(...graphResult.findings);
     } catch {
-      // Graph engine failure is non-fatal — pattern results are still returned
+      // Graph engine failure is non-fatal
     }
   }
 

@@ -22,6 +22,25 @@ vi.mock('node:child_process', () => ({
   execFile: vi.fn(),
 }));
 
+// Mock built-in engines
+vi.mock('../../../src/engines/builtin/secrets.js', () => ({
+  scanSecrets: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('../../../src/engines/builtin/patterns.js', () => ({
+  scanPatterns: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('../../../src/engines/builtin/dependencies.js', () => ({
+  scanDependencies: vi.fn().mockResolvedValue([]),
+}));
+
+// Mock graph engine
+vi.mock('../../../src/engines/graph/index.js', () => ({
+  isGraphEngineAvailable: vi.fn().mockReturnValue(false),
+  runGraphEngine: vi.fn(),
+}));
+
 import {
   runPatternEngine,
   computeScore,

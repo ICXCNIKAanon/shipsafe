@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/bin/shipsafe.js",
+    "postinstall": "node dist/src/scripts/postinstall.js 2>/dev/null || true",
     "dev": "tsx bin/shipsafe.ts",
     "test": "vitest run",
     "test:watch": "vitest",

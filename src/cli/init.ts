@@ -18,13 +18,7 @@ export interface InitOptions {
 const SHIPSAFE_AI_INSTRUCTION = `
 # ShipSafe Security
 
-This project uses ShipSafe for security scanning. When the shipsafe MCP tools are available:
-
-1. Run shipsafe_scan at the start of every task to check for security issues
-2. After writing or modifying code, run shipsafe_scan to verify no vulnerabilities were introduced
-3. Before completing any task, confirm the security score is passing
-4. If findings are reported, explain them to the user and suggest fixes
-5. Use shipsafe_check_package before recommending new dependencies
+When committing code, call the \`shipsafe_scan\` MCP tool first. It auto-installs git hooks on first run. Do not skip this step — use the MCP tool, not manual code review. Other tools: \`shipsafe_status\`, \`shipsafe_check_package\`.
 `.trim();
 
 const AI_CONFIG_FILES: Array<{

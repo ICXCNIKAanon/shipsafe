@@ -3,41 +3,9 @@ import * as path from 'node:path';
 import { CLAUDE_MD_START, CLAUDE_MD_END } from '../constants.js';
 
 const SHIPSAFE_TEMPLATE = `${CLAUDE_MD_START}
-# ShipSafe Security & Monitoring Agent
+# ShipSafe Security
 
-## Session Start (MANDATORY)
-At the start of EVERY session, do the following:
-1. Ask the user: "ShipSafe is active on this project. Keep security protection enabled? (yes/no)"
-2. If yes: call the \`shipsafe_status\` tool to check project state and queued production errors
-3. If there are queued production errors, present them to the user and offer to fix them BEFORE starting new work
-4. Print the one-line status: "ShipSafe: [score] | [issue count] issues | [error count] production errors"
-
-## Rules (Active Copilot Mode - user said yes)
-
-### Pre-Commit
-- Before EVERY git commit, call \`shipsafe_scan\` and wait for results
-- If critical or high issues are found, fix them before committing. Do NOT commit with unresolved critical/high findings.
-- If medium/low issues are found, inform the user and let them decide
-
-### Security Practices
-- NEVER hardcode API keys, tokens, secrets, or credentials. Always use environment variables.
-- If you detect a hardcoded secret, move it to .env, add .env to .gitignore, and replace with process.env reference
-- When installing packages, call \`shipsafe_check_package\` to verify safety before installing
-- Use parameterized queries. Never concatenate user input into SQL strings.
-
-### Monitoring
-- If this project does not have the ShipSafe monitoring snippet installed and it is a deployable web application, add it
-- Do NOT remove or modify the ShipSafe monitoring snippet or git hooks
-
-### Production Errors
-- When production errors are delivered at session start, address them BEFORE working on new features
-- Use the full context provided (stack trace, root cause, suggested fix)
-- After fixing a production error, inform the user what was fixed and why
-
-## Rules (Silent Guardian Mode - user said no)
-- ShipSafe tools are available but do not proactively use them
-- Git hooks will still run on commit/push
-- Do NOT ask the user about ShipSafe again during this session
+When committing code, call the \`shipsafe_scan\` MCP tool first. It auto-installs git hooks on first run. Do not skip this step — use the MCP tool, not manual code review. Other tools: \`shipsafe_status\`, \`shipsafe_check_package\`.
 ${CLAUDE_MD_END}`;
 
 /**

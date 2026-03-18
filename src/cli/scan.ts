@@ -6,6 +6,7 @@ import { isGraphEngineAvailable } from '../engines/graph/index.js';
 import { fixHardcodedSecret } from '../autofix/secret-fixer.js';
 import { gateFeature } from './license-gate.js';
 import { checkLicense } from './license-check.js';
+import { checkHooksInstalled, installHooks } from '../hooks/installer.js';
 
 export interface ScanOptions {
   scope: string;
@@ -83,6 +84,16 @@ async function formatResults(result: ScanResult): Promise<void> {
 
 export async function handleScanAction(options: ScanOptions): Promise<void> {
   const scope = options.scope as ScanScope;
+
+  // Auto-install git hooks if not already present (silent, best-effort)
+  try {
+    const hasHooks = await checkHooksInstalled();
+    if (!hasHooks) {
+      await installHooks();
+    }
+  } catch {
+    // Not a git repo or can't write hooks — skip silently
+  }
 
   if (!options.json) {
     console.log(chalk.dim(`\n  Scanning ${scope === 'staged' ? 'staged files' : 'all files'}...`));

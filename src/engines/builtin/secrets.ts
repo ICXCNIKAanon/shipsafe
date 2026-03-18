@@ -201,10 +201,21 @@ function shouldSkipFile(filePath: string): boolean {
 
 // ── Directory walker ───────────────────────────────────────────────────────────
 
+const MAX_SECRET_FILES = 5_000;
+
 async function walkDirectory(dirPath: string): Promise<string[]> {
   const files: string[] = [];
+  let hitLimit = false;
+
+  // Refuse to scan home/root directories
+  const homedir = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  const resolvedPath = join(dirPath); // normalize
+  if (resolvedPath === homedir || resolvedPath === '/' || resolvedPath === '/tmp') {
+    return files;
+  }
 
   async function walk(currentPath: string): Promise<void> {
+    if (hitLimit) return;
     let entries;
     try {
       entries = await readdir(currentPath, { withFileTypes: true });
@@ -216,6 +227,7 @@ async function walkDirectory(dirPath: string): Promise<string[]> {
     const promises: Promise<void>[] = [];
 
     for (const entry of entries) {
+      if (hitLimit) break;
       const fullPath = join(currentPath, entry.name);
 
       if (entry.isDirectory()) {
@@ -236,6 +248,10 @@ async function walkDirectory(dirPath: string): Promise<string[]> {
 
       if (entry.isFile() && !shouldSkipFile(fullPath)) {
         files.push(fullPath);
+        if (files.length >= MAX_SECRET_FILES) {
+          hitLimit = true;
+          break;
+        }
       }
     }
 

@@ -38,7 +38,7 @@ describe('injectClaudeMd', () => {
     const content = await fs.readFile(path.join(tmpProject, 'CLAUDE.md'), 'utf-8');
     expect(content).toContain(CLAUDE_MD_START);
     expect(content).toContain(CLAUDE_MD_END);
-    expect(content).toContain('# ShipSafe Security & Monitoring Agent');
+    expect(content).toContain('# ShipSafe Security');
     expect(content).toContain('shipsafe_scan');
     expect(content).toContain('shipsafe_status');
     expect(content).toContain('shipsafe_check_package');
@@ -85,7 +85,7 @@ describe('injectClaudeMd', () => {
     expect(content).not.toContain('Old ShipSafe content');
     expect(content).not.toContain('This is outdated.');
     // New template should be present
-    expect(content).toContain('# ShipSafe Security & Monitoring Agent');
+    expect(content).toContain('# ShipSafe Security');
     // Existing project content preserved
     expect(content).toContain('# My Project');
     // Only one start sentinel

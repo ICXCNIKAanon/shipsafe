@@ -135,8 +135,11 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: false,
     skipTestFiles: true,
     detect: (line) => {
-      // Match patterns like query("SELECT ... " + variable) or execute("INSERT ... " + variable)
-      return /\b(?:query|execute|raw|prepare)\s*\(\s*(?:"|')(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^"']*(?:"|')\s*\+/i.test(line);
+      // Match patterns like query("SELECT ... " + variable) or db.run("INSERT ... " + variable)
+      // Covers: query, execute, raw, prepare, run, get, all, each, exec (SQLite), plus pool/client/connection.query
+      // Use separate patterns for double and single quotes to handle embedded opposite quotes
+      return /\b(?:query|execute|raw|prepare|run|get|all|each|exec)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^"]*"\s*\+/i.test(line) ||
+        /\b(?:query|execute|raw|prepare|run|get|all|each|exec)\s*\(\s*'(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^']*'\s*\+/i.test(line);
     },
   },
   {
@@ -151,8 +154,50 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: false,
     skipTestFiles: true,
     detect: (line) => {
-      // Match query(`SELECT ... ${...}`) patterns, but NOT tagged template literals like sql`...`
-      return /\b(?:query|execute|raw|prepare)\s*\(\s*`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{/i.test(line);
+      // Match db.run(`SELECT ... ${...}`) patterns, but NOT tagged template literals like sql`...`
+      // Covers: query, execute, raw, prepare, run, get, all, each, exec
+      return /\b(?:query|execute|raw|prepare|run|get|all|each|exec)\s*\(\s*`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{/i.test(line);
+    },
+  },
+  {
+    id: 'SQL_INJECTION_INLINE_VAR',
+    category: 'SQL Injection',
+    description: 'SQL query string built with embedded variable via concatenation — vulnerable to SQL injection.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use parameterized queries with placeholders (?, $1, :param) instead of string concatenation in SQL statements.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Catch cases where SQL keyword appears in a string concatenated with +, even without a db method on the same line
+      // e.g., const sql = "SELECT * FROM users WHERE id = " + userId;
+      const hasSqlKeyword = /"(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^"]*"\s*\+\s*[a-zA-Z_$]/i.test(line) ||
+        /'(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^']*'\s*\+\s*[a-zA-Z_$]/i.test(line);
+      if (!hasSqlKeyword) return false;
+      // Exclude string concatenation that's clearly not SQL (check for SQL structural words)
+      return /\b(?:FROM|INTO|SET|VALUES|WHERE|TABLE|JOIN|ORDER BY|GROUP BY)\b/i.test(line);
+    },
+  },
+  {
+    id: 'SQL_INJECTION_TEMPLATE_STRING',
+    category: 'SQL Injection',
+    description: 'SQL query built as a template literal with interpolated values — vulnerable to SQL injection.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use parameterized queries with placeholders instead of embedding variables directly in SQL template strings.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Catch template literals containing SQL keywords + interpolation, even outside a db method call
+      // e.g., const sql = `SELECT * FROM users WHERE id = ${userId}`;
+      // But NOT tagged templates like sql`...` or Prisma.$queryRaw`...`
+      if (/\b(?:sql|html|css|gql|graphql)\s*`/.test(line)) return false;
+      if (/\$queryRaw\s*`/.test(line)) return false;
+      return /`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{[^}]+\}[^`]*`/i.test(line);
     },
   },
   {
@@ -169,8 +214,10 @@ const RULES: PatternRule[] = [
       // Python: cursor.execute("SELECT ... " + var) or cursor.execute("SELECT ... %s" % var)
       // or cursor.execute(f"SELECT ...")
       return (
-        /\b(?:execute|executemany)\s*\(\s*(?:"|')(?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*(?:"|')\s*%/i.test(line) ||
-        /\b(?:execute|executemany)\s*\(\s*(?:"|')(?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*(?:"|')\s*\+/i.test(line) ||
+        /\b(?:execute|executemany)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*"\s*%/i.test(line) ||
+        /\b(?:execute|executemany)\s*\(\s*'(?:SELECT|INSERT|UPDATE|DELETE)\b[^']*'\s*%/i.test(line) ||
+        /\b(?:execute|executemany)\s*\(\s*"(?:SELECT|INSERT|UPDATE|DELETE)\b[^"]*"\s*\+/i.test(line) ||
+        /\b(?:execute|executemany)\s*\(\s*'(?:SELECT|INSERT|UPDATE|DELETE)\b[^']*'\s*\+/i.test(line) ||
         /\b(?:execute|executemany)\s*\(\s*f(?:"|')(?:SELECT|INSERT|UPDATE|DELETE)\b/i.test(line)
       );
     },
@@ -187,12 +234,14 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: false,
     skipTestFiles: true,
     detect: (line) => {
-      // Sequelize, TypeORM, Knex, Django, SQLAlchemy raw queries with interpolation
+      // Sequelize, TypeORM, Knex, Prisma, Django, SQLAlchemy raw queries with interpolation
       return (
-        /\b(?:sequelize|connection|entityManager|manager|knex)\s*\.\s*(?:query|raw)\s*\(\s*`[^`]*\$\{/i.test(line) ||
-        /\b(?:sequelize|connection|entityManager|manager|knex)\s*\.\s*(?:query|raw)\s*\(\s*(?:"|')[^"']*(?:"|')\s*\+/i.test(line) ||
+        /\b(?:sequelize|connection|entityManager|manager|knex|pool|client|db|database)\s*\.\s*(?:query|raw|run|get|all|each|exec)\s*\(\s*`[^`]*\$\{/i.test(line) ||
+        /\b(?:sequelize|connection|entityManager|manager|knex|pool|client|db|database)\s*\.\s*(?:query|raw|run|get|all|each|exec)\s*\(\s*"[^"]*"\s*\+/i.test(line) ||
+        /\b(?:sequelize|connection|entityManager|manager|knex|pool|client|db|database)\s*\.\s*(?:query|raw|run|get|all|each|exec)\s*\(\s*'[^']*'\s*\+/i.test(line) ||
         /\bRawSQL\s*\(\s*f(?:"|')/i.test(line) ||
-        /\.raw\s*\(\s*f(?:"|')(?:SELECT|INSERT|UPDATE|DELETE)/i.test(line)
+        /\.raw\s*\(\s*f(?:"|')(?:SELECT|INSERT|UPDATE|DELETE)/i.test(line) ||
+        /\$queryRawUnsafe\s*\(/.test(line)
       );
     },
   },
@@ -998,15 +1047,476 @@ const RULES: PatternRule[] = [
       return !/\bhelmet\b/.test(ctx.fileContent);
     },
   },
+
+  // ════════════════════════════════════════════
+  // SSRF (Server-Side Request Forgery)
+  // ════════════════════════════════════════════
+  {
+    id: 'SSRF_USER_URL',
+    category: 'Server-Side Request Forgery',
+    description:
+      'HTTP request made with a URL from user input (req.query, req.body, req.params) — vulnerable to SSRF.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate and sanitize user-supplied URLs. Use an allowlist of permitted domains/IPs. Block internal/private IP ranges (127.0.0.1, 10.x, 192.168.x, 169.254.x).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:fetch|axios\s*\.\s*(?:get|post|put|patch|delete)|http\s*\.\s*(?:get|request)|got\s*\.\s*(?:get|post)|request\s*\.\s*(?:get|post))\s*\(\s*req\s*\.\s*(?:query|body|params|headers)\b/.test(line) ||
+        /\b(?:fetch|axios\s*\.\s*(?:get|post|put|patch|delete)|http\s*\.\s*(?:get|request))\s*\(\s*(?:url|uri|href|link|target|redirect|callback)\b/.test(line) &&
+        /\breq\s*\.\s*(?:query|body|params)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Insecure Cookie Configuration
+  // ════════════════════════════════════════════
+  {
+    id: 'COOKIE_NO_HTTPONLY',
+    category: 'Insecure Cookie',
+    description:
+      'Cookie set without httpOnly flag — accessible to JavaScript, enabling theft via XSS.',
+    severity: 'medium',
+    fix_suggestion:
+      'Set httpOnly: true on cookies containing session tokens or sensitive data to prevent JavaScript access.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Match res.cookie(...) calls
+      if (!/\bres\s*\.\s*cookie\s*\(/.test(line)) return false;
+      // Check for httpOnly in a 5-line window
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return !/httpOnly\s*:\s*true/.test(window);
+    },
+  },
+  {
+    id: 'COOKIE_NO_SECURE',
+    category: 'Insecure Cookie',
+    description:
+      'Cookie set without secure flag — will be sent over unencrypted HTTP connections.',
+    severity: 'medium',
+    fix_suggestion:
+      'Set secure: true on cookies to ensure they are only sent over HTTPS.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bres\s*\.\s*cookie\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return !/secure\s*:\s*true/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // NoSQL Injection
+  // ════════════════════════════════════════════
+  {
+    id: 'NOSQL_INJECTION',
+    category: 'NoSQL Injection',
+    description:
+      'MongoDB query uses user input directly — vulnerable to NoSQL injection via operator injection ($gt, $ne, etc.).',
+    severity: 'high',
+    fix_suggestion:
+      'Validate and sanitize user input before using in MongoDB queries. Ensure input is the expected type (string, not object). Use mongo-sanitize or explicitly cast values.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match patterns like .find({ email: req.body.email }) or .findOne(req.body)
+      return /\.\s*(?:find|findOne|findOneAndUpdate|findOneAndDelete|updateOne|updateMany|deleteOne|deleteMany|aggregate|countDocuments)\s*\(\s*req\s*\.\s*(?:body|query|params)\b/.test(line) ||
+        /\.\s*(?:find|findOne|findOneAndUpdate|findOneAndDelete|updateOne|updateMany)\s*\(\s*\{[^}]*:\s*req\s*\.\s*(?:body|query|params)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Mass Assignment
+  // ════════════════════════════════════════════
+  {
+    id: 'MASS_ASSIGNMENT',
+    category: 'Mass Assignment',
+    description:
+      'Passing req.body directly to database create/update may allow attackers to set fields they shouldn\'t (e.g., isAdmin, role).',
+    severity: 'medium',
+    fix_suggestion:
+      'Destructure and explicitly pick allowed fields from req.body before passing to database operations. Never pass raw req.body to create/update.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.\s*(?:create|insertOne|insertMany|update|updateOne|findOneAndUpdate|save)\s*\(\s*req\s*\.\s*body\s*[,)]/.test(line) ||
+        /\.\s*(?:create|insert)\s*\(\s*\{\s*\.\.\.\s*req\s*\.\s*body\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Timing-Unsafe Comparison
+  // ════════════════════════════════════════════
+  {
+    id: 'TIMING_UNSAFE_COMPARISON',
+    category: 'Timing Attack',
+    description:
+      'Token or secret compared with === which is vulnerable to timing attacks — comparison time reveals information about the value.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use crypto.timingSafeEqual() (Node.js) for comparing secrets, tokens, HMAC digests, or API keys.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      const lower = line.toLowerCase();
+      if (!/===/.test(line)) return false;
+      return (
+        (lower.includes('token') || lower.includes('hmac') || lower.includes('digest') || lower.includes('signature')) &&
+        !/timingSafeEqual/.test(line)
+      );
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Insecure Randomness (non-crypto contexts)
+  // ════════════════════════════════════════════
+  {
+    id: 'CRYPTO_MATH_RANDOM_ID',
+    category: 'Insecure Cryptography',
+    description:
+      'Math.random() used to generate an ID or token — IDs generated this way are predictable.',
+    severity: 'high',
+    fix_suggestion:
+      'Use crypto.randomUUID() or crypto.randomBytes() for generating unpredictable IDs and tokens.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bMath\s*\.\s*random\s*\(\s*\)/.test(line)) return false;
+      const lower = line.toLowerCase();
+      return lower.includes('id') || lower.includes('slug') || lower.includes('hash');
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Insecure Password Storage
+  // ════════════════════════════════════════════
+  {
+    id: 'AUTH_PLAINTEXT_PASSWORD_STORAGE',
+    category: 'Authentication Issues',
+    description:
+      'Password appears to be stored or inserted without hashing — passwords must always be hashed before storage.',
+    severity: 'critical',
+    fix_suggestion:
+      'Hash passwords with bcrypt, argon2, or scrypt before storing. Never store plaintext passwords.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect patterns where password is directly inserted into a database
+      // e.g., INSERT INTO users ... VALUES ... password or db.create({ password: req.body.password })
+      const lower = line.toLowerCase();
+      if (!lower.includes('password')) return false;
+      // Skip lines that mention hashing
+      if (/\b(?:hash|bcrypt|argon2|scrypt|pbkdf2|crypto)\b/i.test(line)) return false;
+      // Skip process.env references
+      if (/process\s*\.\s*env\b/.test(line)) return false;
+      // Catch INSERT statements with password directly
+      if (/\b(?:INSERT|VALUES)\b/i.test(line) && /\$\{[^}]*password[^}]*\}/i.test(line)) return true;
+      if (/\b(?:INSERT|VALUES)\b/i.test(line) && /(?:"|')\s*\+\s*[a-zA-Z_$]*password/i.test(line)) return true;
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Exposed Error Details
+  // ════════════════════════════════════════════
+  {
+    id: 'DATA_ERROR_DETAILS_LEAK',
+    category: 'Sensitive Data Exposure',
+    description:
+      'Error message or object sent directly in HTTP response — may leak internal details to attackers.',
+    severity: 'medium',
+    fix_suggestion:
+      'Return a generic error message to clients (e.g., "Internal server error"). Log the full error server-side only.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match patterns like res.status(500).json({ error: err }) or res.json({ error: error.message })
+      return /\bres\s*\.\s*(?:status\s*\(\s*5\d{2}\s*\)\s*\.\s*)?(?:json|send)\s*\(\s*\{?\s*(?:error|message|err)\s*:\s*(?:err|error|e)\b/.test(line) ||
+        /\bres\s*\.\s*(?:status\s*\(\s*5\d{2}\s*\)\s*\.\s*)?(?:json|send)\s*\(\s*(?:err|error|e)\s*[,)]/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Hardcoded Database Credentials
+  // ════════════════════════════════════════════
+  {
+    id: 'SECRET_DB_CREDENTIALS',
+    category: 'Hardcoded Secrets',
+    description:
+      'Database connection string or credentials appear to be hardcoded — should use environment variables.',
+    severity: 'critical',
+    fix_suggestion:
+      'Store database credentials in environment variables (e.g., process.env.DATABASE_URL). Never hardcode connection strings.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (/process\s*\.\s*env\b/.test(line) || /os\s*\.\s*(?:environ|getenv)\b/.test(line)) return false;
+      // Match hardcoded connection strings: mongodb://, postgres://, mysql://, redis:// with credentials
+      return /['"](?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis|amqp|mssql):\/\/[^'"]*:[^'"]*@[^'"]+['"]/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Unvalidated File Upload
+  // ════════════════════════════════════════════
+  {
+    id: 'UPLOAD_NO_VALIDATION',
+    category: 'Insecure File Upload',
+    description:
+      'File upload handler without apparent file type or size validation — may allow malicious file uploads.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate file type (MIME type and extension), enforce file size limits, and store uploads outside the web root.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Match multer upload without file filter
+      if (!/\bmulter\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx), Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      return !/fileFilter|limits|maxFileSize/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Prompt Injection — LLM / AI Security
+  // ════════════════════════════════════════════
+  {
+    id: 'PROMPT_INJECTION_CONCAT',
+    category: 'Prompt Injection',
+    description:
+      'User input concatenated directly into an LLM prompt string — vulnerable to prompt injection attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Never concatenate user input into prompts. Use structured message arrays with separate system/user roles, and sanitize user input before including it in any prompt context.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect prompt/system message strings concatenated with user input
+      // e.g., const prompt = "You are a helpful assistant. " + userInput
+      // e.g., const prompt = `You are an assistant. ${req.body.message}`
+      const hasPromptContext = /\b(?:prompt|system_prompt|systemPrompt|system_message|systemMessage|instruction|instructions)\s*[:=]\s*/.test(line);
+      if (!hasPromptContext) return false;
+      // Check for string concatenation or template literal interpolation with likely user input
+      return /(?:"|')\s*\+\s*(?:req\s*\.\s*(?:body|query|params)|user[Ii]nput|input|message|query|question|userMessage|userQuery)\b/.test(line) ||
+        /`[^`]*\$\{[^}]*(?:req\s*\.\s*(?:body|query|params)|user[Ii]nput|input|message|query|question|userMessage|userQuery)\b[^}]*\}/.test(line);
+    },
+  },
+  {
+    id: 'PROMPT_INJECTION_TEMPLATE',
+    category: 'Prompt Injection',
+    description:
+      'User input interpolated into an LLM prompt template — vulnerable to prompt injection.',
+    severity: 'high',
+    fix_suggestion:
+      'Separate system instructions from user content using the API\'s message role system (system/user/assistant). Never embed raw user input into system prompts.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match patterns where user input is embedded in strings that look like LLM prompts
+      // e.g., `You are a helpful assistant. The user says: ${userInput}`
+      // Look for prompt-like language + interpolation with user-input-like variables
+      const isPromptString = /(?:`|"|')(?:You are|Act as|Respond as|Your (?:role|task|job) is|SYSTEM PROMPT)/i.test(line);
+      if (!isPromptString) return false;
+      // Require interpolation with user-input-like variable names (not generic variables)
+      return /\$\{[^}]*(?:req\s*\.\s*(?:body|query|params)|user[Ii]nput|input|message|query|question|userMessage|userQuery|prompt|text|content)\b/.test(line) ||
+        /(?:"|')\s*\+\s*(?:req\s*\.\s*(?:body|query|params)|user[Ii]nput|input|message|query|question|userMessage|userQuery|prompt|text|content)\b/.test(line) ||
+        /\.\s*(?:format|replace)\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'PROMPT_INJECTION_API_UNSANITIZED',
+    category: 'Prompt Injection',
+    description:
+      'User input passed directly to an LLM API call without sanitization — enables prompt injection.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize and validate user input before passing to LLM APIs. Strip or escape control sequences, enforce input length limits, and use structured message roles to separate instructions from user content.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect direct req.body/query passed to AI API content fields
+      // e.g., { role: "user", content: req.body.message }
+      // e.g., messages: [{ role: "user", content: userInput }]
+      if (!/\bcontent\s*:\s*req\s*\.\s*(?:body|query|params)\b/.test(line)) return false;
+      // Verify this is in an AI API context by checking surrounding lines
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\b(?:role|messages|model|openai|anthropic|claude|gpt|chat\.completions|createMessage)\b/i.test(window);
+    },
+  },
+  {
+    id: 'PROMPT_INJECTION_SYSTEM_ROLE_USER_INPUT',
+    category: 'Prompt Injection',
+    description:
+      'User input appears to be included in a system-role message — attackers can override system instructions.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never include user input in system messages. Keep system prompts static. Pass user content only in user-role messages, and consider adding an input validation layer.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect system role messages with interpolated user input
+      // e.g., { role: "system", content: `You are... ${req.body.context}` }
+      if (!/role\s*:\s*['"]system['"]/.test(line)) return false;
+      // Check if this line or nearby lines have user input interpolation in content
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      return /content\s*:.*\$\{/.test(window) ||
+        /content\s*:.*\breq\s*\.\s*(?:body|query|params)\b/.test(window) ||
+        /content\s*:.*(?:"|')\s*\+/.test(window);
+    },
+  },
+  {
+    id: 'PROMPT_INJECTION_NO_INPUT_LIMIT',
+    category: 'Prompt Injection',
+    description:
+      'User input sent to LLM API without apparent length validation — enables token exhaustion and increases prompt injection surface.',
+    severity: 'medium',
+    fix_suggestion:
+      'Enforce a maximum length on user input before passing to LLM APIs. Truncate or reject inputs exceeding the limit. This reduces costs and limits prompt injection surface area.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Look for AI API calls (chat.completions.create, messages.create, etc.) and check
+      // if there's input length validation nearby
+      if (!/\b(?:completions|messages|chat|generate)\s*\.\s*create\s*\(/.test(line)) return false;
+      // Check a wide window for length validation
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 15), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      // If there's length checking, trim, slice, or validation, skip
+      if (/\b(?:\.length|\.slice|\.substring|\.trim|maxLength|max_length|MAX_LENGTH|truncate|validate|maxTokens|max_tokens)\b/.test(window)) return false;
+      // Check if user input is being passed in
+      return /\breq\s*\.\s*(?:body|query|params)\b/.test(window) ||
+        /\b(?:user[Ii]nput|userMessage|userQuery|input|message)\b/.test(window);
+    },
+  },
+  {
+    id: 'PROMPT_INJECTION_PYTHON_FSTRING',
+    category: 'Prompt Injection',
+    description:
+      'User input embedded in a Python f-string prompt — vulnerable to prompt injection.',
+    severity: 'high',
+    fix_suggestion:
+      'Use structured message roles instead of f-string prompts. Separate system instructions from user content. Sanitize user input before inclusion.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match Python f-strings that look like prompts with user variables
+      // e.g., prompt = f"You are a helpful assistant. The user asks: {user_input}"
+      const isPromptAssignment = /\b(?:prompt|system_prompt|system_message|instruction|messages?)\s*=\s*f(?:"|')/.test(line);
+      if (!isPromptAssignment) return false;
+      // Check for variable interpolation (curly braces in f-string)
+      return /\{[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_]+)*\}/.test(line);
+    },
+  },
+  {
+    id: 'PROMPT_INJECTION_RAG_UNSANITIZED',
+    category: 'Prompt Injection',
+    description:
+      'Retrieved document content injected into LLM prompt without sanitization — indirect prompt injection risk via poisoned documents.',
+    severity: 'medium',
+    fix_suggestion:
+      'Sanitize and delimit retrieved content before injecting into prompts. Use clear boundary markers (e.g., XML tags) between instructions and retrieved content. Consider content filtering for suspicious patterns.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect patterns where retrieved/fetched content is embedded in prompts
+      // e.g., content: `Based on these documents: ${documents.map(d => d.content).join('\n')}`
+      // e.g., prompt = f"Context: {retrieved_docs}\n\nQuestion: {query}"
+      const hasContextPattern = /\b(?:context|documents?|chunks?|results?|passages?|retrieved|search_results|embeddings?)\b/i.test(line);
+      if (!hasContextPattern) return false;
+      // Check if this is in a prompt/message context
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 3), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      const isLLMContext = /\b(?:prompt|content|messages?|role|system|openai|anthropic|completion)\b/i.test(window);
+      if (!isLLMContext) return false;
+      // Check for interpolation
+      return /\$\{[^}]*(?:document|chunk|result|passage|retrieved|context|search)\b/i.test(line) ||
+        /\{[a-zA-Z_]*(?:document|chunk|result|passage|retrieved|context|search)[a-zA-Z_]*\}/i.test(line) ||
+        /(?:"|')\s*\+\s*[a-zA-Z_]*(?:document|chunk|result|passage|retrieved|context|search)\b/i.test(line);
+    },
+  },
 ];
 
 // ── File Discovery ──
 
+const MAX_FILES = 5_000;
+
+/** Detect whether a path looks like a project root (has package.json, .git, etc.) */
+async function isProjectDirectory(dir: string): Promise<boolean> {
+  const markers = ['package.json', '.git', 'Cargo.toml', 'pyproject.toml', 'go.mod', 'Gemfile', 'pom.xml'];
+  for (const marker of markers) {
+    try {
+      await stat(join(dir, marker));
+      return true;
+    } catch {
+      // marker not found
+    }
+  }
+  return false;
+}
+
 async function discoverFiles(targetPath: string): Promise<string[]> {
   const files: string[] = [];
   const resolvedTarget = resolve(targetPath);
+  let hitLimit = false;
 
   async function walk(dir: string): Promise<void> {
+    if (hitLimit) return;
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
@@ -1015,6 +1525,7 @@ async function discoverFiles(targetPath: string): Promise<string[]> {
     }
 
     for (const entry of entries) {
+      if (hitLimit) return;
       if (entry.name.startsWith('.') && entry.name !== '.') continue;
 
       if (entry.isDirectory()) {
@@ -1024,6 +1535,10 @@ async function discoverFiles(targetPath: string): Promise<string[]> {
         const ext = extname(entry.name);
         if (SCANNABLE_EXTENSIONS.has(ext)) {
           files.push(join(dir, entry.name));
+          if (files.length >= MAX_FILES) {
+            hitLimit = true;
+            return;
+          }
         }
       }
     }
@@ -1037,6 +1552,15 @@ async function discoverFiles(targetPath: string): Promise<string[]> {
       files.push(resolvedTarget);
     }
   } else {
+    // Refuse to scan non-project directories (e.g., home directory)
+    const isProject = await isProjectDirectory(resolvedTarget);
+    if (!isProject) {
+      // Check if it's a known non-project path (home dir, root, etc.)
+      const homedir = process.env.HOME ?? process.env.USERPROFILE ?? '';
+      if (resolvedTarget === homedir || resolvedTarget === '/' || resolvedTarget === '/tmp') {
+        return files; // Return empty — don't scan home/root directories
+      }
+    }
     await walk(resolvedTarget);
   }
 

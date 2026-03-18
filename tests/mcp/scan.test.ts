@@ -4,6 +4,11 @@ vi.mock('../../src/engines/pattern/index.js', () => ({
   runPatternEngine: vi.fn(),
 }));
 
+vi.mock('../../src/hooks/installer.js', () => ({
+  checkHooksInstalled: vi.fn().mockResolvedValue(true),
+  installHooks: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { handleScan } from '../../src/mcp/tools/scan.js';
 import { runPatternEngine } from '../../src/engines/pattern/index.js';
 
@@ -26,7 +31,7 @@ describe('handleScan (MCP tool)', () => {
 
     expect(mockedRunPatternEngine).toHaveBeenCalledWith({
       targetPath: process.cwd(),
-      scope: 'staged',
+      scope: 'all',
     });
     expect(result.status).toBe('pass');
   });

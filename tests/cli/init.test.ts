@@ -86,14 +86,14 @@ describe('handleInitAction', () => {
     expect(mockedSaveProjectConfig).not.toHaveBeenCalled();
   });
 
-  it('prints a warning when existing projectId is found', async () => {
+  it('prints a message when existing projectId is found', async () => {
     mockedLoadProjectConfig.mockResolvedValue({ projectId: 'proj_existing123' });
 
     await handleInitAction({ projectDir: tmpDir });
 
-    const warnOutput = warnSpy.mock.calls.map((c) => c[0]).join('\n');
+    const logOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     // Should contain some indication that config already exists
-    expect(warnOutput.length).toBeGreaterThan(0);
+    expect(logOutput).toContain('proj_existing123');
   });
 
   it('calls handleSetupAction when skipSetup is false', async () => {

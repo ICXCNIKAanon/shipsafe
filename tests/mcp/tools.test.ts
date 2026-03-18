@@ -48,13 +48,13 @@ describe('handleScan', () => {
     mockedRunPatternEngine.mockResolvedValue(makeScanResult());
   });
 
-  it('calls pattern engine with default scope "staged"', async () => {
+  it('calls pattern engine with default scope "all"', async () => {
     await handleScan({});
 
     expect(mockedRunPatternEngine).toHaveBeenCalledOnce();
     expect(mockedRunPatternEngine).toHaveBeenCalledWith({
       targetPath: process.cwd(),
-      scope: 'staged',
+      scope: 'all',
     });
   });
 

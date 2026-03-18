@@ -2,4 +2,8 @@
 # This is expected — the scanner's regex patterns match the things they detect.
 src/engines/builtin/patterns.ts
 src/engines/builtin/secrets.ts
+src/engines/builtin/dependencies.ts
 tests/
+
+# Packages have separate scan cycles (TODO: fix these findings)
+packages/

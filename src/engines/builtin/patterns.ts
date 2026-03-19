@@ -1492,6 +1492,490 @@ const RULES: PatternRule[] = [
         /(?:"|')\s*\+\s*[a-zA-Z_]*(?:document|chunk|result|passage|retrieved|context|search)\b/i.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Open Redirect (client-side)
+  // ════════════════════════════════════════════
+  {
+    id: 'OPEN_REDIRECT_WINDOW',
+    category: 'Open Redirect',
+    description:
+      'window.location assigned from user-controlled input — allows open redirect attacks for phishing.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate redirect URLs against an allowlist of trusted domains. Never assign user-controlled values directly to window.location.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match window.location = userInput, window.location.href = req.query.redirect, etc.
+      if (!/\bwindow\s*\.\s*location\s*(?:\.href)?\s*=/.test(line)) return false;
+      // Must be assigned from a variable, not a string literal
+      if (/\bwindow\s*\.\s*location\s*(?:\.href)?\s*=\s*['"`]/.test(line)) return false;
+      return true;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Insecure Deserialization (JSON.parse from request)
+  // ════════════════════════════════════════════
+  {
+    id: 'INSECURE_DESERIALIZE_JSON',
+    category: 'Insecure Deserialization',
+    description:
+      'JSON.parse() on raw request body/query without validation — parsed objects may contain unexpected properties or trigger prototype pollution.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate the parsed result with a schema validator (e.g., Zod, Joi, ajv) before using. Never trust the shape of user-supplied JSON.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bJSON\s*\.\s*parse\s*\(\s*req\s*\.\s*(?:body|query)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // OAuth State Parameter Missing
+  // ════════════════════════════════════════════
+  {
+    id: 'OAUTH_STATE_MISSING',
+    category: 'Authentication Issues',
+    description:
+      'OAuth authorize URL constructed without a state parameter — vulnerable to CSRF attacks on the OAuth flow.',
+    severity: 'high',
+    fix_suggestion:
+      'Always include a cryptographically random state parameter in OAuth authorization requests and verify it on callback.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect /authorize URL construction
+      if (!/\/authorize/.test(line)) return false;
+      if (!/\b(?:oauth|auth|client_id|response_type|redirect_uri)\b/i.test(line)) return false;
+      // Check a window for state parameter
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 2), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return !/\bstate\s*[=:]/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // CORS Credentials with Wildcard Origin
+  // ════════════════════════════════════════════
+  {
+    id: 'CORS_CREDENTIALS_WILDCARD',
+    category: 'Insecure Configuration',
+    description:
+      'CORS configured with credentials: true and a wildcard or permissive origin — this misconfiguration can expose authenticated endpoints to any origin.',
+    severity: 'critical',
+    fix_suggestion:
+      'When using credentials: true, specify exact allowed origins instead of "*" or origin: true. Use an allowlist of trusted domains.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Check for credentials: true near origin: '*' or origin: true
+      const lineIdx = ctx.lineNumber - 1;
+      const windowLines = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      const hasCreds = /credentials\s*:\s*true/.test(windowLines);
+      const hasWildcardOrigin = /origin\s*:\s*(?:['"]\*['"]|true)/.test(windowLines);
+      // Only fire on the line that contains credentials: true
+      if (!/credentials\s*:\s*true/.test(line)) return false;
+      return hasCreds && hasWildcardOrigin;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Helmet CSP Disabled
+  // ════════════════════════════════════════════
+  {
+    id: 'HELMET_CSP_DISABLED',
+    category: 'Insecure Configuration',
+    description:
+      'helmet() used with contentSecurityPolicy: false — disables Content-Security-Policy, a critical XSS defense.',
+    severity: 'medium',
+    fix_suggestion:
+      'Configure a proper Content-Security-Policy instead of disabling it. Use helmet.contentSecurityPolicy({ directives: { ... } }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bhelmet\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const windowLines = ctx.allLines
+        .slice(Math.max(0, lineIdx), Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      return /contentSecurityPolicy\s*:\s*false/.test(windowLines);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // HMAC / Signature Unsafe Comparison
+  // ════════════════════════════════════════════
+  {
+    id: 'HMAC_COMPARISON_UNSAFE',
+    category: 'Timing Attack',
+    description:
+      'HMAC, signature, or digest compared with === instead of crypto.timingSafeEqual() — enables timing attacks to forge signatures.',
+    severity: 'high',
+    fix_suggestion:
+      'Use crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b)) to compare HMAC digests, signatures, and other secret values.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/===/.test(line)) return false;
+      if (/timingSafeEqual/.test(line)) return false;
+      // Specifically target HMAC/signature/digest comparisons
+      return /\b(?:hmac|signature|digest|mac)\b/i.test(line) &&
+        /===/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Express Session Insecure
+  // ════════════════════════════════════════════
+  {
+    id: 'EXPRESS_SESSION_INSECURE',
+    category: 'Insecure Configuration',
+    description:
+      'express-session configured with insecure defaults — missing secure cookie flag or using a hardcoded secret string.',
+    severity: 'high',
+    fix_suggestion:
+      'Set cookie.secure: true in production, use a strong secret from environment variables (process.env.SESSION_SECRET), and use a persistent session store (not MemoryStore).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bsession\s*\(\s*\{/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const windowLines = ctx.allLines
+        .slice(Math.max(0, lineIdx), Math.min(ctx.allLines.length, lineIdx + 10))
+        .join(' ');
+      // Flag if secret is a hardcoded string literal
+      const hasHardcodedSecret = /secret\s*:\s*['"][^'"]+['"]/.test(windowLines) &&
+        !/process\s*\.\s*env\b/.test(windowLines);
+      // Flag if secure: true is missing from cookie config
+      const missingSecure = !/secure\s*:\s*true/.test(windowLines);
+      return hasHardcodedSecret || missingSecure;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Unvalidated File Type
+  // ════════════════════════════════════════════
+  {
+    id: 'UNVALIDATED_FILE_TYPE',
+    category: 'Insecure File Upload',
+    description:
+      'User-supplied file metadata (mimetype, originalname) used in path construction without validation — may allow path traversal or arbitrary file overwrites.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate file extensions against an allowlist. Never use the original filename directly — generate a safe filename (e.g., UUID) and validate the MIME type.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect req.file.mimetype or req.file.originalname used in path operations
+      return (
+        /\breq\s*\.\s*file\s*\.\s*(?:mimetype|originalname)\b/.test(line) &&
+        /\b(?:join|resolve|writeFile|rename|move|createWriteStream|path|extname)\b/.test(line)
+      );
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Response Header Injection
+  // ════════════════════════════════════════════
+  {
+    id: 'RESPONSE_HEADER_INJECTION',
+    category: 'Header Injection',
+    description:
+      'User input placed directly in HTTP response headers — can enable header injection, response splitting, or cache poisoning.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize and validate user input before setting response headers. Strip newlines (\\r\\n) and validate against expected values.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bres\s*\.\s*(?:setHeader|header|set)\s*\([^,]+,\s*req\s*\.\s*(?:body|query|params|headers)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Prototype Pollution via Deep Merge
+  // ════════════════════════════════════════════
+  {
+    id: 'PROTOTYPE_POLLUTION_MERGE',
+    category: 'Prototype Pollution',
+    description:
+      'Deep merge/extend with user input can lead to prototype pollution — attackers can inject __proto__ or constructor properties.',
+    severity: 'high',
+    fix_suggestion:
+      'Use a merge library that filters prototype keys (e.g., lodash >= 4.17.21 with safeguards), or validate/strip __proto__ and constructor from user input before merging.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:merge|extend|deepMerge|deepExtend|defaultsDeep)\s*\([^)]*req\s*\.\s*(?:body|query|params)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Insecure Random Token Generation
+  // ════════════════════════════════════════════
+  {
+    id: 'INSECURE_RANDOM_TOKEN',
+    category: 'Insecure Cryptography',
+    description:
+      'Using Date.now(), Math.random(), or UUID v1 (timestamp-based) for security tokens — these are predictable and not cryptographically secure.',
+    severity: 'high',
+    fix_suggestion:
+      'Use crypto.randomBytes() or crypto.randomUUID() for generating security tokens, session IDs, and nonces.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      const lower = line.toLowerCase();
+      const isSecurityContext = lower.includes('token') || lower.includes('session') ||
+        lower.includes('nonce') || lower.includes('csrf') || lower.includes('secret') ||
+        lower.includes('apikey') || lower.includes('api_key');
+      if (!isSecurityContext) return false;
+      return /\bDate\s*\.\s*now\s*\(\s*\)/.test(line) ||
+        /\buuid\s*\.\s*v1\s*\(\s*\)/.test(line) ||
+        /\buuidv1\s*\(\s*\)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Missing CSRF Protection
+  // ════════════════════════════════════════════
+  {
+    id: 'MISSING_CSRF_PROTECTION',
+    category: 'CSRF',
+    description:
+      'Express app has POST/PUT/DELETE routes but no CSRF protection middleware detected in the file — vulnerable to cross-site request forgery.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add CSRF protection middleware (e.g., csurf, csrf-csrf, or lusca) to state-changing routes. For APIs using tokens (not cookies), CSRF may not be needed.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Only fire on the first POST/PUT/DELETE route definition in the file
+      if (!/\b(?:app|router)\s*\.\s*(?:post|put|delete)\s*\(/.test(line)) return false;
+      // Check if any CSRF middleware exists in the file
+      if (/\b(?:csrf|csurf|csrfProtection|lusca|xsrf)\b/i.test(ctx.fileContent)) return false;
+      // Don't flag API-only routes that use bearer token auth (not cookie-based)
+      if (/\b(?:bearer|authorization|jwt|api[_-]?key)\b/i.test(ctx.fileContent)) return false;
+      return true;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // SSRF with Variable URL
+  // ════════════════════════════════════════════
+  {
+    id: 'SSRF_FETCH_VARIABLE',
+    category: 'Server-Side Request Forgery',
+    description:
+      'HTTP request made with a variable URL that may originate from user input — potential SSRF vector.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate URLs against an allowlist of permitted domains. Block requests to internal/private IP ranges (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Match fetch(url), axios.get(url), got(url) where url is a variable
+      const match = /\b(?:fetch|axios\s*(?:\.\s*(?:get|post|put|patch|delete))?|got(?:\.\s*(?:get|post))?|request)\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[,)]/.exec(line);
+      if (!match) return false;
+      const varName = match[1];
+      // Skip if the argument is a string literal, static import, or known-safe
+      if (/^['"`]/.test(varName)) return false;
+      // Check if user input feeds this variable in nearby lines
+      const lineIdx = ctx.lineNumber - 1;
+      const windowLines = ctx.allLines
+        .slice(Math.max(0, lineIdx - 10), lineIdx + 1)
+        .join(' ');
+      return /\breq\s*\.\s*(?:body|query|params)\b/.test(windowLines);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Log Injection
+  // ════════════════════════════════════════════
+  {
+    id: 'LOG_INJECTION',
+    category: 'Log Injection',
+    description:
+      'User input logged directly without sanitization — enables log forging, log injection, and can corrupt log analysis.',
+    severity: 'medium',
+    fix_suggestion:
+      'Sanitize user input before logging by stripping newlines and control characters, or use structured logging (JSON) to prevent log forging.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:console\s*\.\s*(?:log|info|warn|error|debug)|logger\s*\.\s*(?:info|warn|error|debug|log))\s*\([^)]*req\s*\.\s*(?:body|query|params|headers)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Weak Password Hashing
+  // ════════════════════════════════════════════
+  {
+    id: 'WEAK_PASSWORD_HASH',
+    category: 'Insecure Cryptography',
+    description:
+      'SHA-256/SHA-512 used for password hashing — fast hash algorithms allow rapid brute-force attacks. Use a slow, salted algorithm instead.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use bcrypt, argon2, or scrypt for password hashing. These algorithms are intentionally slow and include salting, making brute-force attacks impractical.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      const lower = line.toLowerCase();
+      if (!lower.includes('password') && !lower.includes('passwd')) return false;
+      // Skip if bcrypt/argon2/scrypt is mentioned
+      if (/\b(?:bcrypt|argon2|scrypt|pbkdf2)\b/i.test(line)) return false;
+      // JS: createHash('sha256').update(password)
+      // Python: hashlib.sha256(password.encode())
+      return /createHash\s*\(\s*['"]sha(?:256|512)['"]\s*\)/.test(line) ||
+        /\bhashlib\s*\.\s*sha(?:256|512)\s*\(/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Python: Insecure Deserialization (marshal, shelve)
+  // ════════════════════════════════════════════
+  {
+    id: 'PYTHON_DESERIALIZE_UNSAFE',
+    category: 'Insecure Deserialization',
+    description:
+      'marshal.loads() or shelve.open() with untrusted data can execute arbitrary code — similar to pickle.',
+    severity: 'critical',
+    fix_suggestion:
+      'Avoid marshal and shelve for untrusted data. Use JSON or another safe serialization format.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bmarshal\s*\.\s*loads?\s*\(/.test(line) ||
+        /\bshelve\s*\.\s*open\s*\(/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Python: exec() / compile() with user input
+  // ════════════════════════════════════════════
+  {
+    id: 'PYTHON_EXEC',
+    category: 'Code Injection',
+    description:
+      'exec() or compile() executes arbitrary Python code — critical code injection risk if user input reaches these functions.',
+    severity: 'critical',
+    fix_suggestion:
+      'Avoid exec() and compile() with dynamic input. Use a safe expression evaluator or AST-based approach if dynamic evaluation is truly needed.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bexec\s*\(/.test(line) || /\bcompile\s*\([^)]+,\s*[^)]+,\s*['"]exec['"]/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Python: SSRF
+  // ════════════════════════════════════════════
+  {
+    id: 'PYTHON_SSRF',
+    category: 'Server-Side Request Forgery',
+    description:
+      'HTTP request made with a variable URL in Python — potential SSRF if the URL originates from user input.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate URLs against an allowlist of permitted domains. Block requests to internal/private IP ranges.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // requests.get(url), urllib.request.urlopen(url), httpx.get(url)
+      return (
+        /\brequests\s*\.\s*(?:get|post|put|patch|delete|head|options)\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*[,)]/.test(line) ||
+        /\burlopen\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*[,)]/.test(line) ||
+        /\bhttpx\s*\.\s*(?:get|post|put|patch|delete)\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*[,)]/.test(line)
+      ) && !/\(\s*['"]/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Python: Server-Side Template Injection (SSTI)
+  // ════════════════════════════════════════════
+  {
+    id: 'PYTHON_TEMPLATE_INJECTION',
+    category: 'Template Injection',
+    description:
+      'render_template_string() or Template() with user input enables server-side template injection — attackers can execute arbitrary code.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never pass user input to render_template_string() or Template(). Use render_template() with separate template files and pass user data as context variables.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // render_template_string(user_input) or Template(user_input)
+      return /\brender_template_string\s*\(\s*[a-zA-Z_]/.test(line) ||
+        /\bTemplate\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\)/.test(line) &&
+        !/\bTemplate\s*\(\s*['"]/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Python: os.popen() Shell Injection
+  // ════════════════════════════════════════════
+  {
+    id: 'PYTHON_SHELL_INJECTION',
+    category: 'Command Injection',
+    description:
+      'os.popen() passes commands through the shell — vulnerable to command injection.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use subprocess.run() with a list of arguments (shell=False) instead of os.popen().',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bos\s*\.\s*popen\s*\(/.test(line);
+    },
+  },
 ];
 
 // ── File Discovery ──

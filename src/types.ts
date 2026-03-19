@@ -23,6 +23,10 @@ export interface ScanResult {
   score: SecurityScore;
   findings: Finding[];
   scan_duration_ms: number;
+  /** Number of genuinely new findings (not in baseline). Only set for staged scans with a baseline. */
+  new_findings_count?: number;
+  /** Number of findings suppressed because they exist in the baseline. Only set for staged scans with a baseline. */
+  baseline_suppressed_count?: number;
 }
 
 export interface ShipSafeConfig {

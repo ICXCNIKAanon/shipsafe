@@ -60,7 +60,11 @@ async function formatResults(result: ScanResult): Promise<void> {
   // Score
   const duration = formatDuration(result.scan_duration_ms);
   const scoreColor = result.score === 'A' ? chalk.green : result.score === 'B' ? chalk.yellow : chalk.red;
-  console.log(`  Score: ${scoreColor(chalk.bold(result.score))}  |  ${result.findings.length} findings  |  ${chalk.dim(duration)}`);
+  let findingsSummary = `${result.findings.length} findings`;
+  if (result.baseline_suppressed_count !== undefined && result.baseline_suppressed_count > 0) {
+    findingsSummary += chalk.dim(` (${result.baseline_suppressed_count} baselined)`);
+  }
+  console.log(`  Score: ${scoreColor(chalk.bold(result.score))}  |  ${findingsSummary}  |  ${chalk.dim(duration)}`);
   console.log(`  Tier:  ${chalk.dim(license.tier)}`);
   console.log('');
 

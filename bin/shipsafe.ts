@@ -9,6 +9,7 @@ import { registerConnectCommand } from '../src/cli/connect.js';
 import { registerUploadSourcemapsCommand } from '../src/cli/upload-sourcemaps.js';
 import { registerConfigCommand } from '../src/cli/config.js';
 import { registerInitCommand } from '../src/cli/init.js';
+import { registerBaselineCommand } from '../src/cli/baseline.js';
 
 const program = new Command();
 program
@@ -24,6 +25,7 @@ registerConnectCommand(program);
 registerUploadSourcemapsCommand(program);
 registerConfigCommand(program);
 registerInitCommand(program);
+registerBaselineCommand(program);
 
 program
   .command('mcp-server')

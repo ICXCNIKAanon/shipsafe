@@ -5,6 +5,7 @@ import { checkSemgrepInstalled, runSemgrep } from './semgrep.js';
 import { checkGitleaksInstalled, runGitleaks } from './gitleaks.js';
 import { checkTrivyInstalled, runTrivy } from './trivy.js';
 import { runGraphEngine, isGraphEngineAvailable } from '../graph/index.js';
+import { loadBaseline, filterNewFindings } from '../builtin/baseline.js';
 
 export interface PatternEngineOptions {
   targetPath: string;
@@ -143,20 +144,36 @@ export async function runPatternEngine(options: PatternEngineOptions): Promise<S
     return orderA - orderB;
   });
 
-  // 7. Compute score
-  const score = computeScore(findings);
+  // 7. Delta mode: for staged scans, filter against baseline
+  let reportedFindings = findings;
+  let newFindingsCount: number | undefined;
+  let baselineSuppressedCount: number | undefined;
 
-  // 8. Determine status
-  const hasCriticalOrHigh = findings.some(
+  if (scope === 'staged') {
+    const baseline = await loadBaseline(targetPath);
+    if (baseline.findings.length > 0) {
+      reportedFindings = filterNewFindings(findings, baseline, targetPath);
+      newFindingsCount = reportedFindings.length;
+      baselineSuppressedCount = findings.length - reportedFindings.length;
+    }
+  }
+
+  // 8. Compute score (based on reported findings only)
+  const score = computeScore(reportedFindings);
+
+  // 9. Determine status
+  const hasCriticalOrHigh = reportedFindings.some(
     (f) => f.severity === 'critical' || f.severity === 'high',
   );
   const status = hasCriticalOrHigh ? 'fail' : 'pass';
 
-  // 9. Return ScanResult with timing info
+  // 10. Return ScanResult with timing info
   return {
     status,
     score,
-    findings,
+    findings: reportedFindings,
     scan_duration_ms: Date.now() - startTime,
+    ...(newFindingsCount !== undefined && { new_findings_count: newFindingsCount }),
+    ...(baselineSuppressedCount !== undefined && { baseline_suppressed_count: baselineSuppressedCount }),
   };
 }

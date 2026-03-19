@@ -2486,6 +2486,383 @@ const RULES: PatternRule[] = [
       return /\b(?:functions|tools|function_call|tool_choice|parameters)\b/.test(window);
     },
   },
+
+  // ════════════════════════════════════════════
+  // ORM Raw Query Misuse
+  // ════════════════════════════════════════════
+  {
+    id: 'ORM_RAW_QUERY_UNSAFE',
+    category: 'SQL Injection',
+    description:
+      'ORM raw query API used with string interpolation or concatenation — bypasses ORM safety and enables SQL injection.',
+    severity: 'high',
+    fix_suggestion:
+      'Use the ORM\'s parameterized query API (e.g., createQueryBuilder().where("user.id = :id", { id }), Prisma.$executeRaw with tagged template, Sequelize replacements).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // TypeORM createQueryBuilder with interpolation in .where()
+      if (/\.createQueryBuilder\b/.test(line) && /\.where\s*\(\s*`[^`]*\$\{/.test(line)) return true;
+      // Prisma $executeRawUnsafe (already caught by SQL_INJECTION_ORM_RAW, but this is explicit)
+      if (/\$executeRawUnsafe\s*\(/.test(line)) return true;
+      // Sequelize literal() with concatenation (+ operator with user input)
+      if (/\bliteral\s*\(\s*"[^"]*"\s*\+/.test(line)) return true;
+      if (/\bliteral\s*\(\s*'[^']*'\s*\+/.test(line)) return true;
+      if (/\bliteral\s*\(\s*`[^`]*\$\{/.test(line)) return true;
+      // Drizzle sql.raw() with template interpolation
+      if (/\bsql\s*\.\s*raw\s*\(\s*`[^`]*\$\{/.test(line)) return true;
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Mongoose $where Injection
+  // ════════════════════════════════════════════
+  {
+    id: 'MONGOOSE_WHERE_INJECTION',
+    category: 'NoSQL Injection',
+    description:
+      'Mongoose $where operator with user-controlled JavaScript string enables server-side JS injection — attackers can execute arbitrary code in MongoDB.',
+    severity: 'critical',
+    fix_suggestion:
+      'Avoid $where entirely. Use standard MongoDB query operators ($eq, $gt, $in, etc.) instead. If $where is truly needed, never include user input.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match $where with template literal or concatenation containing user input
+      return /\$where\s*:\s*`[^`]*\$\{/.test(line) ||
+        /\$where\s*:\s*(?:"|')[^"']*(?:"|')\s*\+/.test(line) ||
+        /\$where\s*:\s*(?:req\s*\.\s*(?:body|query|params)|userInput|input)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Redis Key Injection / Cache Poisoning
+  // ════════════════════════════════════════════
+  {
+    id: 'REDIS_KEY_INJECTION',
+    category: 'Cache Poisoning',
+    description:
+      'Redis/cache key or command built from unsanitized user input — enables cache poisoning, key injection, or data leakage.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate and sanitize user input before using in cache keys. Use a hash function or prefix-based namespace, and strip special characters (newlines, spaces, null bytes).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Direct user input in redis/cache operations
+      if (/\b(?:redis|cache|memcached|client)\s*\.\s*(?:get|set|del|hget|hset|sadd|srem|zadd|lpush|rpush|eval|evalsha|expire|exists)\s*\(\s*req\s*\.\s*(?:body|query|params)\b/.test(line)) return true;
+      // Template literal with req.params/query/body in cache key
+      if (/\b(?:redis|cache|memcached|client)\s*\.\s*(?:get|set|del|hget|hset|sadd|srem|zadd|lpush|rpush|eval|evalsha|expire|exists)\s*\(\s*`[^`]*\$\{[^}]*req\s*\.\s*(?:params|query|body)\b/.test(line)) return true;
+      // redis.eval with req.body (Lua script injection)
+      if (/\b(?:redis|client)\s*\.\s*eval\s*\(\s*req\s*\.\s*(?:body|query)\b/.test(line)) return true;
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Email / SMS Header Injection
+  // ════════════════════════════════════════════
+  {
+    id: 'EMAIL_HEADER_INJECTION',
+    category: 'Injection',
+    description:
+      'User input placed in email headers, recipient fields, or messaging APIs without sanitization — enables email header injection, BCC injection, or spam relay.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate and sanitize email addresses (strip \\r\\n characters). Use a library like validator.js or email-validator. Never pass raw user input to email header fields.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // CRLF in email context (\\r\\n near email keywords)
+      if (/\\r\\n/.test(line) && /\b(?:To|Bcc|Cc|Subject|From|Reply-To|email)\b/i.test(line)) return true;
+      // sendMail/transporter with req.body fields
+      if (/\b(?:sendMail|send_mail|transporter)\s*\(\s*\{/.test(line) && /req\s*\.\s*(?:body|query|params)\b/.test(line)) return true;
+      // Twilio/SNS send with user input
+      if (/\b(?:twilio|sns|sendgrid|mailgun)\b/i.test(line) && /\b(?:messages|sms|email)\b/i.test(line) && /req\s*\.\s*(?:body|query|params)\b/.test(line)) return true;
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // XXE (XML External Entity) Parser Unsafe
+  // ════════════════════════════════════════════
+  {
+    id: 'XXE_PARSER_UNSAFE',
+    category: 'XML External Entity (XXE)',
+    description:
+      'XML parser used with user input without disabling external entity processing — vulnerable to XXE attacks that can read local files, perform SSRF, or cause denial of service.',
+    severity: 'high',
+    fix_suggestion:
+      'Disable external entity processing. For DOMParser, use a library like fast-xml-parser with entity processing disabled. For libxmljs, set { noent: false, nonet: true }. For Python lxml, use defusedxml.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // JS: DOMParser().parseFromString with variable input
+      if (/\bDOMParser\s*\(\s*\)\s*\.\s*parseFromString\s*\(\s*[a-zA-Z_$]/.test(line) &&
+          !/\bDOMParser\s*\(\s*\)\s*\.\s*parseFromString\s*\(\s*['"`]/.test(line)) return true;
+      // libxmljs.parseXml without safe options
+      if (/\blibxmljs\s*\.\s*parseXml\s*\(\s*[a-zA-Z_$]/.test(line) &&
+          !/noent\s*:\s*false/.test(line)) return true;
+      // xml2js, fast-xml-parser with variable input (no entity config)
+      if (/\b(?:xml2js|parseString|Parser)\s*\.\s*parse(?:String)?\s*\(\s*[a-zA-Z_$]/.test(line) &&
+          !/\b(?:strict|noent|processEntities)\b/.test(line)) return true;
+      // Python: lxml.etree.parse/fromstring with variable
+      if (/\b(?:lxml\s*\.\s*)?etree\s*\.\s*(?:parse|fromstring)\s*\(\s*[a-zA-Z_]/.test(line) &&
+          !/defuse|defused/i.test(line)) return true;
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // LDAP Injection
+  // ════════════════════════════════════════════
+  {
+    id: 'LDAP_INJECTION',
+    category: 'LDAP Injection',
+    description:
+      'LDAP filter built with string interpolation or concatenation — vulnerable to LDAP injection attacks that can bypass authentication or leak directory data.',
+    severity: 'high',
+    fix_suggestion:
+      'Use parameterized LDAP filters or escape special LDAP characters (*, (, ), \\, NUL) in user input. Use ldap-escape or similar library.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // LDAP filter pattern with interpolation: (&(uid=${...}) or (cn=...${...})
+      if (/\(\s*(?:&|\|)?\s*\(\s*(?:uid|cn|sn|mail|memberOf|dn|sAMAccountName|userPrincipalName)\s*=/.test(line) &&
+          /\$\{/.test(line)) return true;
+      // Python f-string LDAP filter
+      if (/f(?:"|')\s*\(\s*(?:&|\|)?\s*\(\s*(?:uid|cn|sn|mail)\s*=\s*\{/.test(line)) return true;
+      // Python ldap3 search with f-string filter
+      if (/\.search\s*\(.*f(?:"|')\(/.test(line) && /\b(?:uid|cn|sn|mail)\b/.test(line)) return true;
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Server-Side Template Injection (SSTI)
+  // ════════════════════════════════════════════
+  {
+    id: 'SSTI_RENDER_USER_INPUT',
+    category: 'Template Injection',
+    description:
+      'Template engine render function called with user-controlled template name or template string — enables server-side template injection (SSTI) for remote code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never pass user input as a template name or template string. Use render() with static template names and pass user data as context variables only.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Express res.render() with req.query/body/params as template name
+      if (/\bres\s*\.\s*render\s*\(\s*req\s*\.\s*(?:query|body|params)\b/.test(line)) return true;
+      // Nunjucks/EJS/Pug renderString with user input
+      if (/\b(?:nunjucks|ejs|pug|handlebars|mustache)\s*\.\s*(?:renderString|render|compile)\s*\(\s*req\s*\.\s*(?:body|query|params)\b/.test(line)) return true;
+      // Any renderString with user input variable
+      if (/\brenderString\s*\(\s*(?:req\s*\.\s*(?:body|query|params)|userInput|user_input|input|template)\b/.test(line)) return true;
+      // Python jinja2 from_string with variable (not string literal)
+      if (/\bfrom_string\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\)/.test(line) &&
+          /\b(?:jinja2|jinja|Environment|template)\b/i.test(line)) return true;
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Insecure Direct Object Reference (IDOR)
+  // ════════════════════════════════════════════
+  {
+    id: 'IDOR_NO_OWNERSHIP_CHECK',
+    category: 'Broken Access Control',
+    description:
+      'Database query uses a user-supplied ID (req.params, req.query) to fetch data without comparing against the authenticated user\'s session — enables unauthorized access to other users\' data.',
+    severity: 'high',
+    fix_suggestion:
+      'Always verify that the requested resource belongs to the authenticated user. Compare req.params.id against the session user ID, or add a WHERE clause filtering by the authenticated user.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Must be a route handler that uses req.params or req.query to fetch data
+      if (!/\b(?:app|router)\s*\.\s*(?:get|post|put|patch|delete)\s*\(/.test(line)) return false;
+      // Must be a data-access route (not login/auth)
+      if (/\/(?:auth|login|signup|register|public)\b/.test(line)) return false;
+      // Check for req.params/query in the handler window
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      const hasUserSuppliedId = /\breq\s*\.\s*(?:params|query)\s*\.\s*(?:id|userId|fileId|accountId|orderId)\b/.test(window);
+      if (!hasUserSuppliedId) return false;
+      // Check for DB access (supports chained ORM calls like prisma.user.findUnique)
+      const hasDbAccess = /\b(?:db|prisma|knex|sequelize|pool|client|mongoose|Model)\s*\.(?:\s*[a-zA-Z_]+\s*\.)*\s*(?:query|find|findOne|findUnique|findFirst|findMany|get|select|findAll)\b/i.test(window);
+      if (!hasDbAccess) return false;
+      // Check for ownership/auth validation — must be specific patterns, not just the word "user"
+      const hasOwnershipCheck = /\b(?:req\.user|session\.user|session\.userId|getSession|getServerSession|currentUser|ctx\.user|context\.user|context\.auth|auth\.user|req\.session)\b/i.test(window);
+      // Check for validation middleware in route definition
+      const hasValidationMiddleware = /\b(?:validate|validator|param\s*\(|check\s*\(|isUUID|isInt|guard|protect|requireAuth|isAuthenticated|authMiddleware)\b/i.test(line);
+      return !hasOwnershipCheck && !hasValidationMiddleware;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Header Injection via req.headers
+  // ════════════════════════════════════════════
+  {
+    id: 'HEADER_INJECTION_HOST',
+    category: 'Header Injection',
+    description:
+      'User-controlled Host header or request header value used in URL construction or proxy target — enables SSRF, cache poisoning, or host header injection attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Never trust the Host header for URL construction. Use a configured/hardcoded host value or validate against an allowlist of expected hosts.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Template literal URL construction with req.headers.host
+      if (/`[^`]*\$\{[^}]*req\s*\.\s*headers\s*\.\s*host\b/.test(line) &&
+          /\b(?:http|https|fetch|axios|request|got|url|URL)\b/i.test(line)) return true;
+      // String concat with req.headers.host in URL
+      if (/(?:"|')\s*\+\s*req\s*\.\s*headers\s*\.\s*host\b/.test(line) &&
+          /\b(?:http|https|fetch|axios|request|got|url|URL)\b/i.test(line)) return true;
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // DoS: Unbounded Parsing
+  // ════════════════════════════════════════════
+  {
+    id: 'DOS_UNBOUNDED_PARSE',
+    category: 'Denial of Service',
+    description:
+      'JSON.parse() called on raw request body without size limits — enables denial of service via extremely large payloads.',
+    severity: 'medium',
+    fix_suggestion:
+      'Set request body size limits using express.json({ limit: "100kb" }) or similar middleware. Never parse raw body content without size validation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // JSON.parse(req.body) — raw body parsing without middleware
+      return /\bJSON\s*\.\s*parse\s*\(\s*req\s*\.\s*body\s*\)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Zip Bomb / Archive Extraction
+  // ════════════════════════════════════════════
+  {
+    id: 'ZIP_BOMB',
+    category: 'Denial of Service',
+    description:
+      'User-uploaded archive extracted without size validation — vulnerable to zip bomb attacks that exhaust disk space or memory.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate archive contents before extraction: check total uncompressed size, number of entries, and nesting depth. Set extraction size limits.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // AdmZip, unzipper, tar, archiver extraction
+      if (!/\b(?:extractAllTo|extract|unzip|decompress|gunzip|inflate)\s*\(/.test(line)) return false;
+      // Check for user file context nearby
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      const hasUserFile = /\breq\s*\.\s*(?:file|files|body)\b/.test(window) ||
+        /\b(?:upload|uploaded|userFile|file\.buffer)\b/i.test(window);
+      if (!hasUserFile) return false;
+      // Check for size validation
+      const hasSizeCheck = /\b(?:maxSize|max_size|sizeLimit|size_limit|MAX_SIZE|limit|fileSize|uncompressedSize)\b/i.test(window);
+      return !hasSizeCheck;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // ReDoS (enhanced for nested groups)
+  // ════════════════════════════════════════════
+  {
+    id: 'REGEX_DOS_NESTED',
+    category: 'Regex DoS',
+    description:
+      'Complex regular expression with nested groups and quantifiers applied to user input — vulnerable to catastrophic backtracking (ReDoS).',
+    severity: 'high',
+    fix_suggestion:
+      'Simplify the regex or use the RE2 engine (re2 npm package) which guarantees linear-time matching. Avoid nested quantifiers on user-supplied input.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match nested group quantifiers like ((...)+.)+ or ((...)*.)+ on user input context
+      if (!/\b(?:userInput|user_input|input|req\s*\.\s*(?:body|query|params)|match|test|replace|search)\b/.test(line)) return false;
+      // Detect nested groups with quantifiers: ((...)+ ...)+ pattern
+      return /\(\s*\([^)]*\)\s*[+*][^)]*\)\s*[+*]/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // K8s Secret Plaintext
+  // ════════════════════════════════════════════
+  {
+    id: 'K8S_SECRET_PLAINTEXT',
+    category: 'Hardcoded Secrets',
+    description:
+      'Plaintext secret or password value detected in what appears to be a Kubernetes manifest or configuration string — secrets should use K8s Secret resources with base64 encoding at minimum, or an external secrets manager.',
+    severity: 'high',
+    fix_suggestion:
+      'Use Kubernetes Secrets (kind: Secret) with data encoded in base64, or better yet, use an external secrets manager (Vault, AWS Secrets Manager, etc.).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match password: or apiKey: or secret: followed by a plaintext value (not a variable reference) in manifest-like context
+      if (!/\b(?:password|apiKey|api_key|secret_key|secretKey|db_password|database_password|auth_token)\s*:\s*[a-zA-Z0-9_!@#$%^&*]{8,}/.test(line)) return false;
+      // Must look like a manifest/config context (YAML-like string or template)
+      return /`[^`]*\b(?:password|apiKey|api_key|secret_key|secretKey)\s*:/.test(line) ||
+        /['"][^'"]*\b(?:password|apiKey|api_key|secret_key|secretKey)\s*:/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Docker Socket Mount
+  // ════════════════════════════════════════════
+  {
+    id: 'DOCKER_SOCKET_MOUNT',
+    category: 'Insecure Configuration',
+    description:
+      'Docker socket (/var/run/docker.sock) accessed in application code — grants the application full control over the Docker daemon, equivalent to root access on the host.',
+    severity: 'critical',
+    fix_suggestion:
+      'Avoid mounting the Docker socket in application containers. Use Docker-in-Docker (DinD), rootless Docker, or a Docker API proxy with restricted permissions instead.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\/var\/run\/docker\.sock/.test(line);
+    },
+  },
 ];
 
 // ── File Discovery ──

@@ -3768,6 +3768,751 @@ const RULES: PatternRule[] = [
       return /(?:10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)/.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 21: React / Next.js Advanced
+  // ════════════════════════════════════════════
+  {
+    id: 'REACT_USEEFFECT_UNCONTROLLED_FETCH',
+    category: 'Server-Side Request Forgery',
+    description:
+      'useEffect making fetch with user-controlled URL without cleanup — enables SSRF and race conditions from stale requests.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate URLs against an allowlist before fetching. Use AbortController for cleanup and avoid user-controlled URLs in useEffect.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\buseEffect\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 12))
+        .join(' ');
+      const hasFetch = /\bfetch\s*\(/.test(window);
+      const hasUserUrl = /\b(?:url|href|src|endpoint)\b/i.test(window) &&
+        /\b(?:params|searchParams|query|props\.|input|user)\b/i.test(window);
+      const hasCleanup = /\babort|AbortController|return\s*\(\s*\)\s*=>|cleanup/i.test(window);
+      return hasFetch && hasUserUrl && !hasCleanup;
+    },
+  },
+  {
+    id: 'NEXTJS_REDIRECT_USER_INPUT',
+    category: 'Open Redirect',
+    description:
+      'Next.js redirect() called with user-controlled input in Server Component — enables open redirect attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate redirect targets against an allowlist of paths. Never pass raw user input to redirect().',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bredirect\s*\(/.test(line)) return false;
+      // Must not be a hardcoded string
+      if (/\bredirect\s*\(\s*['"`]\/[^'"$`]*['"`]\s*\)/.test(line)) return false;
+      // Check if it uses user input
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 8), lineIdx + 1)
+        .join(' ');
+      return /\b(?:searchParams|params|req\s*\.\s*(?:query|body|params)|headers\(\)|url)\b/.test(window);
+    },
+  },
+  {
+    id: 'NEXT_GETSTATIC_PROPS_LEAK',
+    category: 'Sensitive Data Exposure',
+    description:
+      'getStaticProps returning database query results directly in props — all data is serialized to static HTML viewable by anyone.',
+    severity: 'high',
+    fix_suggestion:
+      'Filter and map database results to only include public-facing fields before returning in getStaticProps.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bgetStaticProps\b/.test(ctx.fileContent)) return false;
+      if (!/\bprops\s*:/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 8), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      if (!/\bgetStaticProps\b/.test(window)) return false;
+      // Check for raw DB results in props
+      return /\b(?:db\s*\.\s*query|prisma\s*\.\s*[a-zA-Z]+\s*\.\s*findMany|\.rows)\b/.test(window) &&
+        /\bprops\s*:/.test(window);
+    },
+  },
+  {
+    id: 'SERVER_ACTION_NO_CSRF',
+    category: 'CSRF',
+    description:
+      'Next.js Server Action (\'use server\') performs state-changing operations without origin/CSRF validation — may be callable cross-origin.',
+    severity: 'medium',
+    fix_suggestion:
+      'Verify the request origin header matches your domain in Server Actions, or use Next.js built-in CSRF protection. Always validate the caller identity.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/['"]use server['"]/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 15))
+        .join(' ');
+      const hasDbMutation = /\b(?:UPDATE|INSERT|DELETE|create|update|delete|remove)\b/i.test(window);
+      const hasCsrfCheck = /\b(?:csrf|origin|referer|csrfToken|verifyOrigin|headers\(\).*origin)\b/i.test(window);
+      return hasDbMutation && !hasCsrfCheck;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 22: AWS SDK Misuse
+  // ════════════════════════════════════════════
+  {
+    id: 'AWS_S3_SIGNED_URL_NO_EXPIRY',
+    category: 'Cloud Misconfiguration',
+    description:
+      'S3 getSignedUrl called without specifying Expires parameter — signed URL defaults to long or no expiry.',
+    severity: 'high',
+    fix_suggestion:
+      'Always set a short Expires value: s3.getSignedUrl("getObject", { Bucket, Key, Expires: 900 }). 900 seconds (15 minutes) is a reasonable default.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bgetSignedUrl\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      return !/\bExpires\s*:/i.test(window);
+    },
+  },
+  {
+    id: 'AWS_SES_USER_HTML_BODY',
+    category: 'Cross-Site Scripting (XSS)',
+    description:
+      'SES sendEmail with user-controlled HTML body — enables XSS via email when recipients view the email in a webmail client.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize user-provided HTML with DOMPurify or a server-side sanitizer before using in SES email bodies. Use text-only emails when possible.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:sendEmail|sendRawEmail|sendTemplatedEmail)\s*\(/.test(line) &&
+          !/\bSES\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10))
+        .join(' ');
+      return /\b(?:Html|Body)\b.*\breq\s*\.\s*(?:body|query)\b/.test(window) ||
+        /\breq\s*\.\s*(?:body|query)\b.*\b(?:Html|Body)\b/.test(window);
+    },
+  },
+  {
+    id: 'AWS_DYNAMODB_FULL_SCAN',
+    category: 'Denial of Service',
+    description:
+      'DynamoDB scan() without Limit parameter — scans entire table, causing high read costs and latency at scale.',
+    severity: 'medium',
+    fix_suggestion:
+      'Always set a Limit parameter on DynamoDB scans, or use query() with a key condition instead of scan(). Paginate results.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:dynamodb|docClient|documentClient|ddb)\s*\.\s*scan\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      return !/\bLimit\s*:/i.test(window);
+    },
+  },
+  {
+    id: 'AWS_SNS_USER_INPUT',
+    category: 'Injection',
+    description:
+      'SNS publish() with unsanitized user input in Message — may enable notification spam or injection in downstream consumers.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate and sanitize user input before publishing to SNS. Enforce message length limits and content policies.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:sns|SNS)\s*\.\s*publish\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      return /\bMessage\s*:.*\breq\s*\.\s*(?:body|query)\b/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 23: Hono / Bun / Deno Specific
+  // ════════════════════════════════════════════
+  {
+    id: 'BUN_FILE_USER_PATH',
+    category: 'Path Traversal',
+    description:
+      'Bun.file() called with user-controlled path — enables path traversal to read arbitrary files on the server.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate and sanitize paths before passing to Bun.file(). Use path.resolve() and verify the resolved path is within an allowed directory.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bBun\s*\.\s*file\s*\(/.test(line)) return false;
+      // Must use user input or unvalidated variable
+      if (/\bBun\s*\.\s*file\s*\(\s*['"`]/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), lineIdx + 1)
+        .join(' ');
+      return /\breq\s*\.\s*(?:body|query|params)\b/.test(window) ||
+        /\b(?:userPath|filePath|inputPath)\b/.test(window) &&
+        !/\b(?:validate|sanitize|resolve|basename|safePath)\b/i.test(window);
+    },
+  },
+  {
+    id: 'DENO_RUN_USER_INPUT',
+    category: 'Command Injection',
+    description:
+      'Deno.run() or Deno.Command() with user input in command array — enables command injection.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never pass user input to Deno.run() or Deno.Command(). Use an allowlist of commands and sanitize all arguments.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bDeno\s*\.\s*(?:run|Command)\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\breq\s*\.\s*(?:body|query|params)\b/.test(window) ||
+        /\b(?:userInput|user_input|input|userCmd)\b/.test(window);
+    },
+  },
+  {
+    id: 'HONO_HTML_UNSANITIZED',
+    category: 'Cross-Site Scripting (XSS)',
+    description:
+      'Hono c.html() rendering user data without sanitization — enables reflected XSS.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize user input with a library like DOMPurify or escape HTML entities before passing to c.html().',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bc\s*\.\s*html\s*\(/.test(line)) return false;
+      // Exclude static strings
+      if (/\bc\s*\.\s*html\s*\(\s*['"`]/.test(line) && !/\$\{/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), lineIdx + 1)
+        .join(' ');
+      const hasUserData = /\breq\b|\bc\s*\.\s*req\b|\bparam\b|\bquery\b|\bbody\b|\buser/i.test(window);
+      const hasSanitize = /\b(?:sanitize|escape|encode|DOMPurify|xss)\b/i.test(window);
+      return hasUserData && !hasSanitize;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 24: Rate Limiting & Abuse Prevention
+  // ════════════════════════════════════════════
+  {
+    id: 'RATE_LIMIT_PASSWORD_RESET',
+    category: 'Missing Rate Limiting',
+    description:
+      'Password reset endpoint without rate limiting — enables account enumeration and denial of service via reset email flooding.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add rate limiting to password reset endpoints. Limit by IP and email address.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\s*\.\s*post\s*\(\s*['"]\/(?:api\/)?(?:auth\/)?(?:reset-password|forgot-password|password-reset)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 3), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      return !/\b(?:rateLimit|rateLimiter|limiter|throttle|slowDown|brute)\b/i.test(window);
+    },
+  },
+  {
+    id: 'RATE_LIMIT_OTP_NO_LIMIT',
+    category: 'Missing Rate Limiting',
+    description:
+      'OTP/2FA verification endpoint without attempt limiting — enables brute-force of short codes.',
+    severity: 'high',
+    fix_suggestion:
+      'Limit OTP verification attempts (e.g., max 5 attempts per code). Lock the code after too many failed attempts.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\s*\.\s*post\s*\(\s*['"]\/(?:api\/)?(?:auth\/)?(?:verify|otp|2fa|mfa|totp|verify-code)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 3), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      return !/\b(?:rateLimit|rateLimiter|limiter|throttle|attempts?|maxAttempts|lockout)\b/i.test(window);
+    },
+  },
+  {
+    id: 'MULTER_NO_LIMITS',
+    category: 'Denial of Service',
+    description:
+      'multer() file upload without limits configuration — allows unlimited file size uploads, enabling denial of service.',
+    severity: 'medium',
+    fix_suggestion:
+      'Configure multer with limits: multer({ limits: { fileSize: 5 * 1024 * 1024 } }) to prevent oversized uploads.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bmulter\s*\(\s*\{/.test(line) && !/\bmulter\s*\(\s*\)/.test(line)) return false;
+      // multer() with no args is definitely missing limits
+      if (/\bmulter\s*\(\s*\)/.test(line)) return true;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      return !/\blimits\b/.test(window);
+    },
+  },
+  {
+    id: 'RATE_LIMIT_REGISTRATION',
+    category: 'Missing Rate Limiting',
+    description:
+      'Account creation/registration endpoint without rate limiting — enables bulk fake account registration.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add rate limiting and CAPTCHA to registration endpoints to prevent automated bulk signups.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\s*\.\s*post\s*\(\s*['"]\/(?:api\/)?(?:auth\/)?(?:register|signup|create-account)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 3), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      return !/\b(?:rateLimit|rateLimiter|limiter|throttle|captcha|recaptcha|hcaptcha|turnstile)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 25: Secrets in Config Files
+  // ════════════════════════════════════════════
+  {
+    id: 'NPMRC_AUTH_TOKEN',
+    category: 'Hardcoded Secrets',
+    description:
+      'authToken hardcoded in .npmrc-like content — grants npm registry access to anyone who reads this file.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use environment variables for npm auth tokens: //registry.npmjs.org/:_authToken=${NPM_TOKEN}',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /_authToken\s*=\s*[a-zA-Z0-9_-]{20,}/.test(line) &&
+        !/\$\{/.test(line) && !/process\s*\.\s*env\b/.test(line);
+    },
+  },
+  {
+    id: 'DOCKER_COMPOSE_PLAINTEXT_PASSWORD',
+    category: 'Hardcoded Secrets',
+    description:
+      'Plaintext password in docker-compose environment variable — visible to anyone with access to the compose file.',
+    severity: 'high',
+    fix_suggestion:
+      'Use env_file directive or ${VARIABLE} syntax referencing .env files. Never hardcode passwords in docker-compose.yml.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect YAML-like environment variables with passwords in string literals
+      return /(?:PASSWORD|PASSWD|DB_PASS|MYSQL_ROOT_PASSWORD|POSTGRES_PASSWORD)\s*[:=]\s*['"]?[a-zA-Z0-9!@#$%^&*_-]{6,}['"]?/.test(line) &&
+        !/\$\{/.test(line) && !/process\s*\.\s*env\b/.test(line) &&
+        !/\benv_file\b/.test(line);
+    },
+  },
+  {
+    id: 'GH_ACTIONS_HARDCODED_SECRET',
+    category: 'Hardcoded Secrets',
+    description:
+      'GitHub Actions workflow with hardcoded secret value instead of using ${{ secrets.X }} — secret exposed in repository code.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use GitHub Actions secrets: ${{ secrets.MY_TOKEN }}. Never hardcode tokens in workflow files.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect patterns like GITHUB_TOKEN: "ghp_..." or TOKEN: "sk-..." in workflow-like context
+      if (!/\b(?:GITHUB_TOKEN|NPM_TOKEN|AWS_ACCESS_KEY|DEPLOY_TOKEN|API_KEY|SECRET_KEY)\s*[:=]\s*['"](?:ghp_|gho_|sk_live_|sk-|AKIA|npm_)[a-zA-Z0-9_-]+['"]/.test(line)) return false;
+      return !/\$\{\{\s*secrets\./.test(line);
+    },
+  },
+  {
+    id: 'TERRAFORM_DEFAULT_CREDENTIALS',
+    category: 'Hardcoded Secrets',
+    description:
+      'Terraform variable with default value containing credentials — defaults are stored in state files and version control.',
+    severity: 'high',
+    fix_suggestion:
+      'Never set default values for sensitive variables in Terraform. Mark them as sensitive and pass via environment variables or .tfvars.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bdefault\s*[:=]\s*['"][a-zA-Z0-9+/=_-]{16,}['"]/.test(line) &&
+        /\b(?:password|secret|token|api_key|access_key|credential)\b/i.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 26: Content Security
+  // ════════════════════════════════════════════
+  {
+    id: 'UGC_HTML_UNSANITIZED',
+    category: 'Cross-Site Scripting (XSS)',
+    description:
+      'User-generated HTML content stored and rendered without sanitization — enables persistent XSS attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize all user-generated HTML with DOMPurify or a server-side sanitizer (e.g., sanitize-html) before storage and rendering.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\.innerHTML\s*=/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), lineIdx + 1)
+        .join(' ');
+      // Must reference user-generated content and lack sanitization
+      const hasUGC = /\b(?:comment|post|message|content|description|bio|review|body)\b/i.test(window) &&
+        /\b(?:user|author|submitted|stored|db|database|record)\b/i.test(window);
+      const hasSanitize = /\b(?:sanitize|DOMPurify|purify|escape|sanitizeHtml|sanitize-html|xss)\b/i.test(window);
+      return hasUGC && !hasSanitize;
+    },
+  },
+  {
+    id: 'SVG_JAVASCRIPT_UPLOAD',
+    category: 'Cross-Site Scripting (XSS)',
+    description:
+      'SVG file content containing JavaScript event handlers (onload, onerror) — enables XSS when the SVG is served or rendered.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize SVG uploads: strip all event handler attributes (on*), <script> tags, and javascript: URIs. Use a dedicated SVG sanitizer.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /<svg\b[^>]*\bon(?:load|error|click|mouseover)\s*=/i.test(line);
+    },
+  },
+  {
+    id: 'PDF_GENERATION_USER_HTML',
+    category: 'Injection',
+    description:
+      'PDF generation (puppeteer/wkhtmltopdf) with user-controlled HTML — enables server-side injection to read local files or execute commands.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize HTML before PDF generation. Use a template engine with auto-escaping. Restrict file:// protocol access in puppeteer.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:page\s*\.\s*setContent|page\s*\.\s*goto|wkhtmltopdf|setContent)\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), lineIdx + 1)
+        .join(' ');
+      return /\breq\s*\.\s*(?:body|query)\b/.test(window) ||
+        /\b(?:userHtml|user_html|htmlContent|content)\b/.test(window) &&
+        !/\b(?:sanitize|escape|purify)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 27: Concurrency & State
+  // ════════════════════════════════════════════
+  {
+    id: 'GLOBAL_MUTABLE_STATE',
+    category: 'Race Condition',
+    description:
+      'Global mutable state shared between requests — concurrent requests will see/modify each other\'s data, causing data leaks and corruption.',
+    severity: 'high',
+    fix_suggestion:
+      'Use request-scoped state (e.g., res.locals, context objects) instead of module-level mutable variables for per-request data.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Module-level `let currentUser = ...` or `let requestData = ...` outside a function
+      if (!/^(?:let|var)\s+(?:current(?:User|Request|Session)|request(?:Data|User|Context)|global(?:User|Data|State))\b/.test(line.trim())) return false;
+      // Must be at module level (not inside a function)
+      const lineIdx = ctx.lineNumber - 1;
+      // Count braces before this line to see if we're at module level
+      const before = ctx.allLines.slice(0, lineIdx).join('\n');
+      const openBraces = (before.match(/\{/g) || []).length;
+      const closeBraces = (before.match(/\}/g) || []).length;
+      return openBraces - closeBraces <= 0;
+    },
+  },
+  {
+    id: 'NON_ATOMIC_READ_WRITE',
+    category: 'Race Condition',
+    description:
+      'Database read followed by conditional write without transaction — concurrent requests can produce inconsistent state.',
+    severity: 'high',
+    fix_suggestion:
+      'Wrap read-then-write sequences in a database transaction with appropriate isolation level, or use atomic operations (e.g., UPDATE ... WHERE).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Look for findUnique/findFirst followed by update without transaction
+      if (!/\b(?:findUnique|findFirst|findOne)\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10))
+        .join(' ');
+      const hasConditionalUpdate = /\bif\s*\(/.test(window) && /\b(?:update|save|set)\s*\(/.test(window);
+      const hasTransaction = /\b(?:transaction|\$transaction|BEGIN|COMMIT|serializable|isolation)\b/i.test(ctx.fileContent);
+      return hasConditionalUpdate && !hasTransaction;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 28: Input Validation Gaps
+  // ════════════════════════════════════════════
+  {
+    id: 'URL_JAVASCRIPT_PROTOCOL',
+    category: 'Cross-Site Scripting (XSS)',
+    description:
+      'URL validation accepts javascript: protocol — enables XSS when the URL is used in href or navigation.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate URLs with the URL constructor and check that protocol is http: or https: only. Reject javascript:, data:, and vbscript: protocols.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect href or src assignment with variable that could be javascript:
+      if (!/\b(?:href|src|action|formAction)\s*=\s*\{?\s*(?:url|link|href|redirect|target|userUrl)\b/.test(line)) return false;
+      // Check that there's no protocol validation nearby
+      return !/\b(?:protocol|startsWith\s*\(\s*['"]https?:?['"]|isValidUrl|validateUrl)\b/.test(line);
+    },
+  },
+  {
+    id: 'DATE_PARSE_USER_INPUT',
+    category: 'Data Handling',
+    description:
+      'new Date() with unsanitized user input — can produce NaN, Invalid Date, or unexpected values that break application logic.',
+    severity: 'low',
+    fix_suggestion:
+      'Validate date strings with a library (dayjs, date-fns) or check isNaN(date.getTime()) before use. Use Zod z.coerce.date() for validation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bnew\s+Date\s*\(\s*req\s*\.\s*(?:body|query|params)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 29: CI/CD & Build Security
+  // ════════════════════════════════════════════
+  {
+    id: 'GH_ACTIONS_EXPRESSION_INJECTION',
+    category: 'Code Injection',
+    description:
+      'GitHub Actions run step using ${{ github.event.pull_request.title }} or similar — enables command injection via crafted PR titles/body.',
+    severity: 'critical',
+    fix_suggestion:
+      'Pass event data as environment variables instead of inline expressions: env: TITLE: ${{ github.event.pull_request.title }}, then use $TITLE in the run step.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect ${{ github.event.* }} in a run: context (string containing both)
+      return /\$\{\{\s*github\.event\.(?:pull_request|issue|comment|head_commit)\.(?:title|body|message|name)\s*\}\}/.test(line) &&
+        /\brun\s*:/i.test(line);
+    },
+  },
+  {
+    id: 'BUILD_HTTP_DEPENDENCY',
+    category: 'Supply Chain',
+    description:
+      'Build script downloading dependency over HTTP (not HTTPS) — vulnerable to man-in-the-middle attacks injecting malicious code.',
+    severity: 'high',
+    fix_suggestion:
+      'Always use HTTPS for downloading build dependencies. Replace http:// with https:// in all download URLs.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:curl|wget|fetch|download|get)\b/i.test(line)) return false;
+      return /\bhttp:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/.test(line) &&
+        /\b(?:install|setup|build|deploy|script|download)\b/i.test(line);
+    },
+  },
+  {
+    id: 'DOCKER_BUILD_ARG_SECRET',
+    category: 'Hardcoded Secrets',
+    description:
+      'Docker build ARG used for secret values — ARGs are visible in image layers and docker history, leaking credentials.',
+    severity: 'high',
+    fix_suggestion:
+      'Use Docker BuildKit secrets: RUN --mount=type=secret,id=mysecret. Never pass secrets via ARG or ENV in Dockerfiles.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bARG\s+(?:PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)\b/i.test(line) &&
+        !/\b--secret\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 30: Final Hardening — Edge Cases
+  // ════════════════════════════════════════════
+  {
+    id: 'UNSAFE_REGEX_CONSTRUCTOR',
+    category: 'Regex DoS',
+    description:
+      'RegExp constructor with user input — enables ReDoS via attacker-controlled regex patterns.',
+    severity: 'high',
+    fix_suggestion:
+      'Escape user input before passing to RegExp: new RegExp(escapeRegExp(input)). Or use a safe matching library.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bnew\s+RegExp\s*\(/.test(line)) return false;
+      return /\bnew\s+RegExp\s*\(\s*req\s*\.\s*(?:body|query|params)\b/.test(line) ||
+        /\bnew\s+RegExp\s*\(\s*(?:userInput|user_input|input|search|pattern|query)\b/.test(line) &&
+        !/\b(?:escape|escapeRegExp|escapeStringRegexp|sanitize)\b/i.test(line);
+    },
+  },
+  {
+    id: 'CHILD_PROCESS_CWD_USER_INPUT',
+    category: 'Command Injection',
+    description:
+      'child_process spawn/exec with user-controlled cwd — enables path traversal in command execution context.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate the cwd path against an allowlist. Never use user input directly as the working directory for child processes.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bcwd\s*:/.test(line)) return false;
+      return /\bcwd\s*:\s*req\s*\.\s*(?:body|query|params)\b/.test(line) ||
+        /\bcwd\s*:\s*(?:userDir|userPath|inputDir)\b/.test(line);
+    },
+  },
+  {
+    id: 'INSECURE_IFRAME_SANDBOX',
+    category: 'Client-Side Security',
+    description:
+      'iframe with user-controlled src and no sandbox attribute — enables clickjacking and cross-origin attacks.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add sandbox attribute to iframes with user-controlled sources. Validate src against an allowlist of trusted origins.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\biframe\b/i.test(line)) return false;
+      if (!/\bsrc\s*=\s*\{/.test(line)) return false;
+      return !/\bsandbox\b/.test(line);
+    },
+  },
+  {
+    id: 'UNVALIDATED_CONTENT_TYPE',
+    category: 'Injection',
+    description:
+      'Response Content-Type set from user input — enables MIME sniffing attacks and content-type confusion.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate Content-Type against an allowlist of expected MIME types. Never let users control the Content-Type header.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:Content-Type|content-type)\b.*\breq\s*\.\s*(?:body|query|params)\b/.test(line) ||
+        /\bres\s*\.\s*(?:type|contentType|setHeader)\s*\([^)]*\breq\s*\.\s*(?:body|query)\b/.test(line);
+    },
+  },
+  {
+    id: 'TEMPLATE_LITERAL_SQL_VARIABLE',
+    category: 'SQL Injection',
+    description:
+      'SQL query assigned to a variable using template literal with interpolation — vulnerable to SQL injection when executed.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use parameterized queries with placeholders ($1, ?, :param) instead of template literal interpolation in SQL strings.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Skip tagged template literals like sql`...`
+      if (/\b(?:sql|html|css|gql|graphql)\s*`/.test(line)) return false;
+      if (/\$queryRaw\s*`/.test(line)) return false;
+      // Match variable assignment like: const query = `SELECT ... ${variable} ...`;
+      if (!/\b(?:const|let|var)\s+(?:query|sql|stmt|statement)\s*=\s*`/.test(line)) return false;
+      return /`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{[^}]+\}[^`]*`/i.test(line);
+    },
+  },
 ];
 
 // ── File Discovery ──

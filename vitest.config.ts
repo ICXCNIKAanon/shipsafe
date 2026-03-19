@@ -7,6 +7,11 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     // Use forks pool to avoid SIGSEGV from KuzuDB native module cleanup
     pool: 'forks',
+    poolOptions: {
+      forks: {
+        maxForks: 2, // Limit workers to prevent memory exhaustion (patterns.ts is 13k+ lines)
+      },
+    },
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

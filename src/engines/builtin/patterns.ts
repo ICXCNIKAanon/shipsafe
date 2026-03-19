@@ -10785,6 +10785,784 @@ const RULES: PatternRule[] = [
       return /\bcrypto\s*\.\s*createCipher\s*\(/.test(line) && !/\bcreateCipheriv\b/.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 41: TypeScript-Specific Vulnerabilities
+  // ════════════════════════════════════════════
+  {
+    id: 'TS_TYPE_ASSERTION_BYPASS_VALIDATION',
+    category: 'Type Safety',
+    description:
+      'Type assertion (as SomeType) on request body bypasses runtime validation — attacker-controlled data is treated as trusted.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate request body at runtime with Zod, Yup, or io-ts before using it as a typed object.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // req.body as AdminUser, req.body as CreateUserInput etc.
+      if (!/\breq\s*\.\s*body\s+as\s+[A-Z]/.test(line)) return false;
+      // Exclude if preceded by Zod parse/validation
+      return !/\b(?:parse|safeParse|validate|transform)\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'TS_GENERIC_PROTOTYPE_POLLUTION',
+    category: 'Type Safety',
+    description:
+      'Generic type parameter with Record or index signature accepting user input — may allow prototype pollution via __proto__ key.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate object keys against a whitelist. Reject __proto__, constructor, and prototype keys.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect: Object.assign(target, req.body) or {...target, ...req.body} with Record<string, any>
+      if (!/\bObject\s*\.\s*assign\s*\([^,]+,\s*req\s*\.\s*body\b/.test(line) &&
+          !/\.\.\.\s*req\s*\.\s*body\b/.test(line)) return false;
+      // Check for Record<string, any> or generic index signature in nearby context
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 3)).join('\n');
+      return /\bRecord\s*<\s*string\s*,\s*any\s*>/.test(window) || /\[\s*key\s*:\s*string\s*\]\s*:\s*any/.test(window);
+    },
+  },
+  {
+    id: 'TS_DISCRIMINATED_UNION_AUTH_NO_DEFAULT',
+    category: 'Type Safety',
+    description:
+      'Switch on user role/type union without default/exhaustive case — new roles may bypass authorization silently.',
+    severity: 'high',
+    fix_suggestion:
+      'Add a default case that throws or denies access. Use TypeScript exhaustive check: const _exhaustive: never = role.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect switch(user.role) or switch(role) patterns
+      if (!/\bswitch\s*\(\s*(?:user\s*\.\s*)?(?:role|type|permission|accessLevel)\s*\)/.test(line)) return false;
+      // Look ahead for default case within 30 lines
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 30)).join('\n');
+      return !/\bdefault\s*:/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 42: Next.js App Router Specific
+  // ════════════════════════════════════════════
+  {
+    id: 'NEXTJS_COOKIES_IN_SQL',
+    category: 'SQL Injection',
+    description:
+      'Next.js cookies() value used directly in SQL query — attacker-controlled cookie data can inject SQL.',
+    severity: 'critical',
+    fix_suggestion:
+      'Parameterize the SQL query. Never interpolate cookie values directly into SQL strings.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bcookies\s*\(\s*\)/.test(line) && /\b(?:query|execute|raw|prepare)\s*\(/.test(line) && /\$\{/.test(line);
+    },
+  },
+  {
+    id: 'NEXTJS_HEADERS_SSRF',
+    category: 'SSRF',
+    description:
+      'Next.js headers() value forwarded to external fetch/request — may enable SSRF via attacker-controlled headers.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate and sanitize header values before forwarding them to external services. Use an allowlist for forwarded headers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bheaders\s*\(\s*\)/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return /\bfetch\s*\(\s*(?:url|endpoint|apiUrl|externalUrl)\b/.test(window) ||
+        /\baxios\s*\.\s*(?:get|post|put|patch)\s*\(/.test(window);
+    },
+  },
+  {
+    id: 'NEXTJS_REDIRECT_USER_INPUT',
+    category: 'Open Redirect',
+    description:
+      'Next.js redirect() with user-controlled input — may redirect users to malicious sites.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate redirect targets against a whitelist of allowed paths/domains. Only allow relative paths.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // redirect(req.query.url) or redirect(searchParams.get('redirect'))
+      return /\bredirect\s*\(\s*(?:req\s*\.\s*(?:query|body)\s*\.\s*\w+|searchParams\s*\.\s*get\s*\()/.test(line);
+    },
+  },
+  {
+    id: 'NEXTJS_SERVER_ACTION_NO_REVALIDATE',
+    category: 'Data Integrity',
+    description:
+      'Next.js server action mutates data without calling revalidatePath/revalidateTag — stale cached data may be served.',
+    severity: 'medium',
+    fix_suggestion:
+      'Call revalidatePath() or revalidateTag() after data mutations in server actions to bust the cache.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect 'use server' actions with DB mutations but no revalidation
+      if (!/['"]use server['"]/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 30)).join('\n');
+      const hasMutation = /\b(?:create|update|delete|insert|remove|save|destroy|upsert)\s*\(/.test(window) ||
+        /\b(?:INSERT|UPDATE|DELETE)\b/.test(window);
+      if (!hasMutation) return false;
+      return !/\brevalidate(?:Path|Tag)\s*\(/.test(window);
+    },
+  },
+  {
+    id: 'NEXTJS_UNSTABLE_CACHE_USER_KEY',
+    category: 'Cache Poisoning',
+    description:
+      'Next.js unstable_cache with user-controlled cache key — attacker can poison cache for other users.',
+    severity: 'high',
+    fix_suggestion:
+      'Use server-derived cache keys only. Never use user input (params, cookies, headers) directly as cache keys.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bunstable_cache\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return /\b(?:req\s*\.\s*(?:query|body|params)|searchParams|cookies\(\)|headers\(\))\b/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 43: React Server Components & Hydration
+  // ════════════════════════════════════════════
+  {
+    id: 'RSC_SECRET_IN_PROPS',
+    category: 'Data Exposure',
+    description:
+      'Sensitive data passed as server component prop — React serializes all props to the client bundle.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never pass secrets, tokens, or API keys as props to client components. Fetch sensitive data server-side only.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // <ClientComponent secret={apiKey} /> or <Component dbPassword={...} />
+      return /\b(?:secret|apiKey|api_key|password|token|privateKey|private_key|dbPassword|secretKey|secret_key)\s*=\s*\{/.test(line) &&
+        /<\s*[A-Z]/.test(line);
+    },
+  },
+  {
+    id: 'RSC_USE_CLIENT_RECEIVES_SECRET',
+    category: 'Data Exposure',
+    description:
+      '"use client" component receives secrets via props — the secret will be visible in the browser bundle.',
+    severity: 'critical',
+    fix_suggestion:
+      'Move secret-dependent logic to a server component or API route. Client components should never receive secrets.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Check if file has 'use client' and component accepts secret-like props
+      if (!/\b(?:secret|apiKey|api_key|password|token|privateKey|private_key|dbPassword|secretKey)\b/.test(line)) return false;
+      if (!/\b(?:props\s*\.\s*|:\s*\{[^}]*)\b(?:secret|apiKey|api_key|password|token|privateKey|private_key|dbPassword|secretKey)\b/.test(line)) return false;
+      return /['"]use client['"]/.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'RSC_DANGEROUSLY_SET_DB_DATA',
+    category: 'XSS',
+    description:
+      'dangerouslySetInnerHTML in server component with database data — stored XSS if DB data is attacker-controlled.',
+    severity: 'critical',
+    fix_suggestion:
+      'Sanitize HTML with DOMPurify or similar before using dangerouslySetInnerHTML. Even server components send HTML to the client.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/dangerouslySetInnerHTML/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 3)).join('\n');
+      return /\b(?:prisma|db|supabase|knex|pool|query|findOne|findFirst|findUnique)\b/.test(window) &&
+        !/\b(?:sanitize|DOMPurify|purify|xss|escape)\b/i.test(window);
+    },
+  },
+  {
+    id: 'RSC_FORM_NO_CSRF',
+    category: 'CSRF',
+    description:
+      'Form action in React Server Component without CSRF token — cross-site form submissions may be possible.',
+    severity: 'high',
+    fix_suggestion:
+      'Include a CSRF token in forms or use Next.js server actions which have built-in CSRF protection.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // <form action={someServerAction}> without csrf token
+      if (!/\bform\b/.test(line) || !/\baction\s*=\s*\{/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return !/\b(?:csrf|csrfToken|_csrf|xsrf|token)\b/i.test(window) &&
+        !/['"]use server['"]/.test(ctx.fileContent);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 44: Supabase/Firebase Specific
+  // ════════════════════════════════════════════
+  {
+    id: 'SUPABASE_SERVICE_ROLE_CLIENT',
+    category: 'Secret Exposure',
+    description:
+      'Supabase service role key used in client-side code — grants full database access bypassing RLS.',
+    severity: 'critical',
+    fix_suggestion:
+      'Only use the service role key on the server. Use the anon key for client-side Supabase clients.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/SERVICE_ROLE/i.test(line)) return false;
+      // Check if in client context
+      return /['"]use client['"]/.test(ctx.fileContent) ||
+        /NEXT_PUBLIC_/.test(line);
+    },
+  },
+  {
+    id: 'SUPABASE_RLS_BYPASS_SERVICE_ROLE',
+    category: 'Authorization',
+    description:
+      'Supabase query using service role client in request handler — bypasses Row Level Security for all queries.',
+    severity: 'high',
+    fix_suggestion:
+      'Use the user-scoped Supabase client (with anon key + user JWT) for request handlers. Reserve service role for admin-only operations.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // supabaseAdmin.from(...) or serviceClient.from(...) in a request handler
+      if (!/\b(?:supabaseAdmin|serviceClient|adminClient|supabaseService)\s*\.\s*from\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 15), Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return /\b(?:req|request|handler|app\.\s*(?:get|post|put|delete|patch)|router\.\s*(?:get|post|put|delete|patch))\b/.test(window);
+    },
+  },
+  {
+    id: 'SUPABASE_RPC_USER_INPUT',
+    category: 'SQL Injection',
+    description:
+      'Supabase rpc() with user-controlled function name — attacker can call arbitrary database functions.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use a static function name with rpc(). Pass user input only as function parameters, not as the function name.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.\s*rpc\s*\(\s*(?:req\s*\.\s*(?:body|query|params)\s*\.\s*\w+|functionName|fnName)\b/.test(line);
+    },
+  },
+  {
+    id: 'FIREBASE_CUSTOM_CLAIMS_CLIENT',
+    category: 'Authorization',
+    description:
+      'Firebase custom claims set from client-side input without validation — users can elevate their own privileges.',
+    severity: 'critical',
+    fix_suggestion:
+      'Set custom claims only from trusted server-side code. Validate claim values against allowed roles.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bsetCustomUserClaims\s*\(/.test(line) &&
+        /\breq\s*\.\s*(?:body|query)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 45: Prisma/Drizzle/ORM Specific
+  // ════════════════════════════════════════════
+  {
+    id: 'PRISMA_QUERYRAW_TEMPLATE_LITERAL',
+    category: 'SQL Injection',
+    description:
+      'Prisma $queryRaw with untagged template literal — interpolated values are NOT parameterized. Use tagged template (no parentheses).',
+    severity: 'critical',
+    fix_suggestion:
+      'Use prisma.$queryRaw`SELECT ...` (tagged, auto-parameterized) instead of prisma.$queryRaw(`SELECT ...`) (untagged, vulnerable).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // $queryRaw( ` ... ${...} ) — parenthesized template literal is NOT safe
+      return /\$queryRaw\s*\(\s*`[^`]*\$\{/.test(line);
+    },
+  },
+  {
+    id: 'PRISMA_MIDDLEWARE_LOG_QUERIES',
+    category: 'Data Exposure',
+    description:
+      'Prisma middleware logging full query parameters — may leak sensitive data (passwords, tokens) to log files.',
+    severity: 'medium',
+    fix_suggestion:
+      'Redact sensitive fields from logged query parameters. Use Prisma event logging with field-level filtering.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b\$use\b/.test(line) && !/\bprisma\s*\.\s*\$use\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 15)).join('\n');
+      return /\bconsole\s*\.\s*log\b/.test(window) && /\bparams\.args\b/.test(window);
+    },
+  },
+  {
+    id: 'TYPEORM_SELECT_FALSE_INCLUDED',
+    category: 'Data Exposure',
+    description:
+      'TypeORM column marked {select: false} but explicitly included in find options — defeats the hidden column protection.',
+    severity: 'high',
+    fix_suggestion:
+      'Do not include {select: false} columns in find queries unless absolutely necessary. Use a separate query for sensitive fields.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect findOne/find with select that includes a password/secret column alongside
+      if (!/\b(?:findOne|find|findOneBy)\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return /\bselect\s*:\s*\[/.test(window) && /['"](?:password|secret|token|hash)['"]/.test(window);
+    },
+  },
+  {
+    id: 'SEQUELIZE_PARANOID_HARD_DELETE',
+    category: 'Data Integrity',
+    description:
+      'Hard delete on a Sequelize paranoid (soft-delete) table — bypasses audit trail and may violate data retention policies.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use the default soft delete for paranoid models. Only use force: true with explicit authorization and audit logging.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.\s*destroy\s*\(\s*\{/.test(line) && /\bforce\s*:\s*true\b/.test(line);
+    },
+  },
+  {
+    id: 'MONGOOSE_SCHEMA_NO_VALIDATION',
+    category: 'Data Integrity',
+    description:
+      'Mongoose schema field without type validation or required constraint — allows arbitrary data insertion.',
+    severity: 'low',
+    fix_suggestion:
+      'Add type constraints and validation to Mongoose schema fields: { type: String, required: true, validate: ... }.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect new Schema({ field: {} }) — empty schema definition
+      if (!/\bnew\s+Schema\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 15)).join('\n');
+      // Check for fields that are just Schema.Types.Mixed or empty object
+      return /Schema\s*\.\s*Types\s*\.\s*Mixed\b/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 46: Stripe/Payment Edge Cases
+  // ════════════════════════════════════════════
+  {
+    id: 'STRIPE_WEBHOOK_NO_IDEMPOTENCY',
+    category: 'Payment Security',
+    description:
+      'Stripe webhook handler processes events without idempotency check — replayed events may cause duplicate charges or fulfillment.',
+    severity: 'high',
+    fix_suggestion:
+      'Store processed event IDs and check before handling. Use: if (await isEventProcessed(event.id)) return;',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bconstructEvent\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 30)).join('\n');
+      return !/\b(?:idempotency|idempotent|processedEvents|eventProcessed|event\.id|eventId)\b/i.test(window) &&
+        /\bevent\s*\.\s*type\b/.test(window);
+    },
+  },
+  {
+    id: 'STRIPE_CHECKOUT_CLIENT_LINE_ITEMS',
+    category: 'Payment Security',
+    description:
+      'Stripe checkout session with line items from client request — attacker can modify prices or add free items.',
+    severity: 'critical',
+    fix_suggestion:
+      'Build line items server-side from your database. Only accept product/variant IDs from the client, then look up prices.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bline_items\s*:\s*req\s*\.\s*body\s*\.\s*(?:lineItems|line_items|items|cart)\b/.test(line);
+    },
+  },
+  {
+    id: 'STRIPE_METADATA_PII',
+    category: 'Payment Security',
+    description:
+      'PII stored in Stripe metadata without encryption — Stripe metadata is visible in dashboard and logs.',
+    severity: 'medium',
+    fix_suggestion:
+      'Encrypt PII before storing in Stripe metadata, or store a reference ID and keep PII in your own encrypted database.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:ssn|social_security|socialSecurity|dateOfBirth|date_of_birth|dob|taxId|tax_id)\s*[=:]/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return /\bmetadata\s*:\s*\{/.test(window) && /\bstripe\b/i.test(window);
+    },
+  },
+  {
+    id: 'STRIPE_TRIAL_MANIPULATION',
+    category: 'Payment Security',
+    description:
+      'Stripe subscription trial_period_days from user input — attacker can set negative or extremely long trial periods.',
+    severity: 'high',
+    fix_suggestion:
+      'Set trial_period_days server-side from your plan configuration. Never accept trial duration from client.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\btrial_period_days\s*:\s*(?:req\s*\.\s*body\s*\.\s*\w+|parseInt\s*\(\s*req\s*\.\s*body)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 47: AWS SDK v3 / Cloud Provider Specific
+  // ════════════════════════════════════════════
+  {
+    id: 'AWS_S3_SIGNED_URL_LONG_EXPIRY',
+    category: 'Cloud Security',
+    description:
+      'S3 getSignedUrl with expiry greater than 1 hour — long-lived signed URLs increase the window for unauthorized access.',
+    severity: 'medium',
+    fix_suggestion:
+      'Set signed URL expiry to 15 minutes or less. Use: expiresIn: 900 (seconds).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bgetSignedUrl\b/.test(line) && !/\bexpiresIn\b/.test(line)) return false;
+      // Match expiresIn: 7200 or Expires: 86400 (anything > 3600)
+      const match = line.match(/\b(?:expiresIn|Expires)\s*:\s*(\d+)/);
+      if (!match) return false;
+      return parseInt(match[1], 10) > 3600;
+    },
+  },
+  {
+    id: 'AWS_SES_EMAIL_INJECTION',
+    category: 'Injection',
+    description:
+      'AWS SES email with user-controlled recipient — attacker can send emails to arbitrary addresses (email injection).',
+    severity: 'high',
+    fix_suggestion:
+      'Validate email recipients against your user database. Never send to arbitrary user-provided addresses.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bSendEmailCommand\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return /\breq\s*\.\s*body\s*\.\s*(?:email|to|recipient)\b/.test(window);
+    },
+  },
+  {
+    id: 'AWS_LAMBDA_USER_FUNCTION_NAME',
+    category: 'Injection',
+    description:
+      'Lambda invoke with user-controlled function name — attacker can invoke arbitrary Lambda functions in your account.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use a whitelist of allowed function names. Map user input to predefined function ARNs.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bInvokeCommand\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return /\bFunctionName\s*:\s*(?:req\s*\.\s*(?:body|query|params)\s*\.\s*\w+|functionName|userFunction)\b/.test(window);
+    },
+  },
+  {
+    id: 'AWS_SNS_USER_TOPIC_ARN',
+    category: 'Injection',
+    description:
+      'SNS publish with user-controlled TopicArn — attacker can send messages to arbitrary SNS topics.',
+    severity: 'high',
+    fix_suggestion:
+      'Use a static topic ARN from configuration. Never accept topic ARNs from user input.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bPublishCommand\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return /\bTopicArn\s*:\s*req\s*\.\s*(?:body|query|params)/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 48: Testing & Development Backdoors
+  // ════════════════════════════════════════════
+  {
+    id: 'DEV_MODE_AUTH_SKIP',
+    category: 'Authentication Bypass',
+    description:
+      'Authentication skipped based on NODE_ENV check — if NODE_ENV is misconfigured in production, auth is bypassed.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never conditionally skip authentication based on environment. Use proper test fixtures and mocks instead.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bNODE_ENV\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return /\b(?:skipAuth|bypassAuth|skipAuthentication|skipValidation|disableAuth)\s*\(/.test(window);
+    },
+  },
+  {
+    id: 'TEST_CREDENTIALS_NON_TEST',
+    category: 'Hardcoded Credentials',
+    description:
+      'Test credentials found in non-test file — these may be deployed to production and used as a backdoor.',
+    severity: 'critical',
+    fix_suggestion:
+      'Move test credentials to test files only. Use environment variables for any credentials in application code.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:testPassword|test_password|testToken|test_token|testApiKey|test_api_key)\s*=\s*['"][^'"]{3,}['"]/.test(line);
+    },
+  },
+  {
+    id: 'DEBUG_ROUTE_ENV_ONLY',
+    category: 'Authentication Bypass',
+    description:
+      'Debug/admin route guarded only by NODE_ENV check — NODE_ENV can be misconfigured or manipulated.',
+    severity: 'high',
+    fix_suggestion:
+      'Protect debug routes with proper authentication in addition to environment checks.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Trigger on the NODE_ENV line, then check the window for debug routes
+      if (!/\bNODE_ENV\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      if (!/(?:\/debug|\/admin-debug|\/dev-tools|\/internal\/debug)/.test(window)) return false;
+      if (!/\b(?:get|post|use|route)\s*\(/.test(window)) return false;
+      return !/\b(?:auth|authenticate|requireAuth|requireAdmin|isAuthenticated|verifyToken)\b/i.test(window);
+    },
+  },
+  {
+    id: 'ADMIN_SEEDER_ALL_ENV',
+    category: 'Authentication Bypass',
+    description:
+      'Admin/seed data creation without environment guard — may create default admin accounts in production.',
+    severity: 'high',
+    fix_suggestion:
+      'Guard seed scripts with strict environment checks: if (process.env.NODE_ENV === "production") throw new Error("Cannot seed in production").',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect createUser/insertUser with admin role without NODE_ENV check
+      if (!/\b(?:createUser|insertUser|seedAdmin|createAdmin)\s*\(/.test(line)) return false;
+      if (!/\b(?:admin|superadmin|root)\b/i.test(line)) return false;
+      return !/\bNODE_ENV\b/.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'FEATURE_FLAG_DISABLES_SECURITY',
+    category: 'Authentication Bypass',
+    description:
+      'Feature flag that disables security controls — if flag is misconfigured, security is disabled in production.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never use feature flags to control security. Security controls should always be active regardless of flags.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:DISABLE_AUTH|SKIP_AUTH|BYPASS_SECURITY|DISABLE_CSRF|DISABLE_RATE_LIMIT|SKIP_VALIDATION)\b/.test(line) &&
+        /\b(?:process\.env|featureFlags|flags|config)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 49: API Design Anti-Patterns
+  // ════════════════════════════════════════════
+  {
+    id: 'GRAPHQL_MUTATION_RETURNS_FULL_USER',
+    category: 'Data Exposure',
+    description:
+      'GraphQL mutation resolver returns full user object including password/hash — leaks credentials in API response.',
+    severity: 'critical',
+    fix_suggestion:
+      'Explicitly select fields in the resolver return. Never return password, hash, or secret fields from mutations.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect: return user; or return await User.findById() in a mutation context
+      if (!/\breturn\s+(?:user|await\s+(?:User|prisma\.user)\s*\.\s*(?:findUnique|findFirst|findById|create|update))\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 15), Math.min(ctx.allLines.length, lineIdx + 3)).join('\n');
+      return /\b(?:Mutation|mutation)\b/.test(window) && !/\bselect\b/.test(window) && !/\b(?:omit|exclude|pick)\b/.test(window);
+    },
+  },
+  {
+    id: 'API_ARBITRARY_FIELD_SELECTION',
+    category: 'Data Exposure',
+    description:
+      'API accepts fields/select parameter for arbitrary field selection — attacker can request sensitive fields.',
+    severity: 'high',
+    fix_suggestion:
+      'Use a whitelist of allowed fields. Never pass user-provided field lists directly to database select/projection.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:select|fields|projection)\s*:\s*req\s*\.\s*(?:query|body)\s*\.\s*(?:fields|select|columns)\b/.test(line);
+    },
+  },
+  {
+    id: 'BATCH_ENDPOINT_NO_PER_ITEM_AUTH',
+    category: 'Authorization',
+    description:
+      'Batch/bulk endpoint iterates items without per-item authorization check — attacker can include unauthorized items.',
+    severity: 'high',
+    fix_suggestion:
+      'Check authorization for each item in a batch operation. Do not assume batch-level auth covers individual items.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect: items.map/forEach with db operations but no auth check per item
+      if (!/\b(?:items|ids|batch|bulk)\s*\.\s*(?:map|forEach)\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 15)).join('\n');
+      return /\b(?:delete|update|destroy|remove)\s*\(/.test(window) &&
+        !/\b(?:authorize|checkPermission|canAccess|isOwner|hasPermission|belongsTo)\b/i.test(window);
+    },
+  },
+  {
+    id: 'WEBHOOK_RETRY_NO_BACKOFF',
+    category: 'DoS',
+    description:
+      'Webhook retry logic without exponential backoff — rapid retries can amplify into DoS on downstream services.',
+    severity: 'medium',
+    fix_suggestion:
+      'Implement exponential backoff with jitter for webhook retries: delay = baseDelay * 2^attempt + random jitter.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Trigger on function/const line containing "webhook" + "retry" in name
+      if (!/\b(?:sendWebhook|webhookRetry|retryWebhook|deliverWebhook)\b/i.test(line) &&
+          !/\bwebhook\b/i.test(line)) return false;
+      if (!/\b(?:function|const|async)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 20)).join('\n');
+      return /\b(?:retries|retry|attempt)\b/.test(window) &&
+        /\b(?:setTimeout|delay|sleep|wait)\b/.test(window) &&
+        !/\b(?:exponential|backoff|Math\.pow|2\s*\*\*|\*\s*2)\b/.test(window);
+    },
+  },
+  {
+    id: 'REST_SELECT_STAR_EQUIVALENT',
+    category: 'Data Exposure',
+    description:
+      'API endpoint returns full database record without field filtering — may expose internal or sensitive fields.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use explicit field selection (select/pick) when returning data from API endpoints. Never return raw DB records.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // res.json(user) or res.json(await db.query('SELECT * FROM users'))
+      if (!/\bres\s*\.\s*json\s*\(\s*(?:user|account|customer|record|row)\s*\)/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 3)).join('\n');
+      return !/\bselect\b/.test(window) && !/\b(?:omit|pick|exclude|sanitize|serialize|toJSON)\b/.test(window);
+    },
+  },
 ];
 
 // ── File Discovery ──

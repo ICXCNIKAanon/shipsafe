@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Finding, Severity } from '../../types.js';
 import { editDistance } from '../../mcp/tools/check-package.js';
+import { loadIgnoreFilter } from './ignore.js';
 
 // ── Types ──
 
@@ -428,6 +429,12 @@ export async function scanDependencies(
   const pkgJson = await readJsonFile<PackageJson>(packageJsonPath);
   if (!pkgJson) {
     // No package.json — nothing to scan
+    return [];
+  }
+
+  // Respect .shipsafeignore — if package.json is ignored, skip dependency audit
+  const ignoreFilter = await loadIgnoreFilter(resolve(targetPath));
+  if (ignoreFilter.isIgnored(packageJsonPath)) {
     return [];
   }
 

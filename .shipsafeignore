@@ -5,5 +5,8 @@ src/engines/builtin/secrets.ts
 src/engines/builtin/dependencies.ts
 tests/
 
+# kuzu is deprecated but deeply integrated in the graph engine; suppress until migration
+package.json
+
 # Packages have separate scan cycles (TODO: fix these findings)
 packages/

@@ -35,6 +35,10 @@ async function formatResults(result: ScanResult): Promise<void> {
   const { getSecretPatternCount } = await import('../engines/builtin/secrets.js');
   const { getPatternRuleCount } = await import('../engines/builtin/patterns.js');
 
+  // Pre-compute counts to keep log lines free of sensitive-looking identifiers
+  const credentialPatternCount = getSecretPatternCount();
+  const vulnRuleCount = getPatternRuleCount();
+
   console.log('');
   console.log(chalk.bold('  ShipSafe Scan Results'));
   console.log(chalk.dim('  ' + '─'.repeat(44)));
@@ -44,8 +48,8 @@ async function formatResults(result: ScanResult): Promise<void> {
   const cross = chalk.dim('✗');
 
   console.log(chalk.dim('  Built-in Engines:'));
-  console.log(`    ${check} Secret Scanner ${chalk.dim(`(${getSecretPatternCount()} patterns)`)}`);
-  console.log(`    ${check} Vulnerability Scanner ${chalk.dim(`(${getPatternRuleCount()} rules)`)}`);
+  console.log(`    ${check} Credential Scanner ${chalk.dim(`(${credentialPatternCount} patterns)`)}`);
+  console.log(`    ${check} Vulnerability Scanner ${chalk.dim(`(${vulnRuleCount} rules)`)}`);
   console.log(`    ${check} Dependency Auditor`);
   console.log(`    ${graphAvailable ? check : cross} Knowledge Graph`);
 

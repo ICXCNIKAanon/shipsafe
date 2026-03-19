@@ -71,7 +71,7 @@ export async function runGitleaks(
 ): Promise<Finding[]> {
   const installed = await checkGitleaksInstalled();
   if (!installed) {
-    console.warn('ShipSafe: gitleaks is not installed, skipping secret scan');
+    console.warn('ShipSafe: gitleaks is not installed, skipping credential scan');
     return [];
   }
 

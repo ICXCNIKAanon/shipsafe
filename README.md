@@ -1,49 +1,75 @@
 # ShipSafe
 
-Full-lifecycle security and reliability platform for vibe coders. Scan for vulnerabilities, auto-fix secrets, monitor production errors, and get AI-powered security insights — all from your terminal or IDE.
+Security scanning for developers who ship fast.
 
-## Features
+[![npm version](https://img.shields.io/npm/v/@shipsafe/cli.svg)](https://www.npmjs.com/package/@shipsafe/cli)
+[![license](https://img.shields.io/badge/license-proprietary-blue.svg)](https://shipsafe.org)
+[![tests](https://img.shields.io/github/actions/workflow/status/jakewlittle-cs/shipsafe/ci.yml?label=tests)](https://github.com/jakewlittle-cs/shipsafe)
 
-- **Security scanning** — wraps Semgrep, Gitleaks, and Trivy into a single `shipsafe scan` command
-- **Knowledge graph engine** — builds a call graph with Tree-sitter + KuzuDB to find attack paths, missing auth, and tainted data flows
-- **Auto-fix** — moves hardcoded secrets to `.env` files automatically with `--fix`
-- **MCP server** — 7 tools for Claude, Cursor, and other AI coding assistants
-- **Production monitoring** — lightweight `@shipsafe/monitor` snippet captures errors and performance data
-- **Git hooks** — pre-commit scanning to catch issues before they land
-- **GitHub App** — PR checks and automated security reviews
-- **License tiers** — FREE (scan), PRO (+ autofix, graph, monitoring, MCP), TEAM/AGENCY (+ sourcemaps, GitHub App)
+## What it does
 
-## Install
+ShipSafe catches vulnerabilities, hardcoded secrets, and dangerous dependencies before they reach production. It ships with 258 built-in detection rules, requires zero configuration, and works with Claude Code, Cursor, Windsurf, Copilot, Cline, and any AI coding tool. Every scan runs in pure TypeScript with no external binary dependencies.
+
+## Quick Start
 
 ```bash
-npm install -g shipsafe
+npm install -g @shipsafe/cli
 ```
 
-## Quick start
+That's it. One command installs the CLI, the MCP server for AI assistants, and auto-registers with Claude Code. Run `shipsafe init` inside any project to install git hooks and write AI instructions to your editor config files.
 
-```bash
-# Initialize ShipSafe in your project
-shipsafe init
+## What it catches
 
-# Scan for vulnerabilities (staged files by default)
-shipsafe scan
+- **84 vulnerability patterns** -- SQL injection, prompt injection, XSS, command injection, path traversal, SSRF, CSRF, prototype pollution, insecure cryptography, insecure deserialization, authentication issues, and more
+- **174 secret patterns** -- AWS keys, GCP service accounts, Azure tokens, GitHub PATs, Stripe keys, database URLs, JWTs, private keys, OAuth secrets, and dozens more -- with Shannon entropy validation to reduce false positives
+- **Dependency vulnerabilities** -- deprecated packages, known CVEs, typosquatting detection, maintenance status checks
 
-# Scan all files
-shipsafe scan --scope all
+## How it works
 
-# Auto-fix hardcoded secrets
-shipsafe scan --fix
+ShipSafe protects your code through three layers:
 
-# Activate a license
-shipsafe activate SS-PRO-yourkeyhere
+1. **Git hooks** (pre-commit and pre-push) -- installed automatically on first scan, they block commits and pushes that contain critical or high-severity findings. Works with any editor, any workflow.
 
-# Start the MCP server (for AI assistants)
-shipsafe mcp-server
+2. **MCP server** -- exposes 7 tools over stdio transport so AI coding assistants can scan, fix, and query your project's security posture in real time.
+
+3. **CLI** -- direct commands for scanning, baselining known findings, checking packages before install, and managing configuration.
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `shipsafe scan` | Scan project for vulnerabilities. Options: `--scope staged\|all\|file:<path>`, `--fix`, `--json` |
+| `shipsafe init` | Initialize ShipSafe in a project. Installs hooks, writes AI config files (CLAUDE.md, .cursorrules, etc.), registers MCP servers |
+| `shipsafe setup` | Register MCP server with Claude Code, Cursor, and other editors |
+| `shipsafe baseline` | Snapshot current findings so only new issues are reported. Options: `--show`, `--clear` |
+| `shipsafe activate <key>` | Activate a Pro or Team license key |
+| `shipsafe config list` | View current configuration |
+| `shipsafe config set <key> <value>` | Set a config value. Add `--global` for user-wide settings |
+| `shipsafe status` | Show project security status, hook state, and available engines |
+| `shipsafe connect` | Connect project to ShipSafe cloud for monitoring |
+| `shipsafe upload-sourcemaps` | Upload source maps for production error resolution |
+| `shipsafe mcp-server` | Start MCP server (stdio transport, used by AI assistants) |
+
+## .shipsafeignore
+
+Create a `.shipsafeignore` file in your project root to exclude files and directories from scanning. Uses gitignore-style syntax:
+
+```gitignore
+# Exclude test fixtures
+tests/fixtures/
+
+# Exclude generated files
+src/generated/
+
+# Exclude specific file
+config/legacy-secrets.ts
 ```
+
+ShipSafe also respects your `.gitignore` and always skips `node_modules`, `dist`, `.git`, and `coverage` by default.
 
 ## Configuration
 
-ShipSafe uses two config files merged together (project overrides global):
+ShipSafe uses two config files, merged together (project overrides global):
 
 - **Global**: `~/.shipsafe/config.json`
 - **Project**: `shipsafe.config.json`
@@ -52,11 +78,10 @@ ShipSafe uses two config files merged together (project overrides global):
 # View current config
 shipsafe config list
 
-# Set a value
-shipsafe config set apiEndpoint https://api.shipsafe.org
+# Set project-level config
 shipsafe config set scan.severity_threshold medium
 
-# Set globally
+# Set global config
 shipsafe config set licenseKey SS-PRO-abc123 --global
 ```
 
@@ -64,104 +89,117 @@ shipsafe config set licenseKey SS-PRO-abc123 --global
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SHIPSAFE_API_URL` | API endpoint override | `http://localhost:3747` |
+| `SHIPSAFE_API_URL` | API endpoint override | `https://shipsafe-m9nc6.ondigitalocean.app` |
 | `SHIPSAFE_DB_PATH` | SQLite database path (API) | `~/.shipsafe/shipsafe.db` |
 
-## MCP Server
+## MCP Tools
 
-ShipSafe exposes an MCP server with 7 tools for AI coding assistants:
+ShipSafe exposes 7 tools through the [Model Context Protocol](https://modelcontextprotocol.io) for AI coding assistants:
 
-- `scan` — run security scan
-- `status` — project security status
-- `check_package` — check npm packages for vulnerabilities
-- `production_errors` — fetch production errors
-- `verify_resolution` — verify if an error is resolved
-- `blast_radius` — analyze impact of changing a function
-- `explain_finding` — get detailed explanation of a finding
+| Tool | Description |
+|------|-------------|
+| `shipsafe_scan` | Run a security scan on a project directory |
+| `shipsafe_status` | Get project security status, hook state, and scanner availability |
+| `shipsafe_check_package` | Vet an npm package before installing (typosquatting, CVEs, maintenance) |
+| `shipsafe_fix` | Apply auto-fix for a finding (moves secrets to .env, suggests code fixes) |
+| `shipsafe_graph_query` | Query the knowledge graph for callers, callees, attack paths, blast radius |
+| `shipsafe_production_errors` | Fetch production errors with stack traces and suggested fixes |
+| `shipsafe_verify_resolution` | Check if a production error has been resolved |
 
-Add to your Claude/Cursor MCP config:
+The MCP server is registered automatically during `shipsafe init` or `shipsafe setup`. To configure it manually:
 
 ```json
 {
   "mcpServers": {
     "shipsafe": {
-      "command": "shipsafe",
-      "args": ["mcp-server"]
+      "command": "npx",
+      "args": ["-y", "shipsafe", "mcp-server"]
     }
   }
 }
 ```
 
-## Monitor snippet
+## Pricing
 
-Capture production errors with `@shipsafe/monitor`:
-
-```bash
-npm install @shipsafe/monitor
-```
-
-```typescript
-import { init } from '@shipsafe/monitor';
-
-const monitor = init({
-  projectId: 'your-project-id',
-  endpoint: 'https://api.shipsafe.org/v1/events', // optional
-});
-```
-
-Features: automatic error capture, PII scrubbing, sampling, batching with retries, auto-disable on repeated failures.
-
-## Cloud API
-
-The ShipSafe API handles monitoring ingest, error processing, source map resolution, and license validation.
+| | Free | Pro ($19/mo) | Team ($49/mo) |
+|--|------|-------------|---------------|
+| Vulnerability + secret scanning | Yes | Yes | Yes |
+| Git hooks (pre-commit, pre-push) | Yes | Yes | Yes |
+| Projects | 1 | 5 | 20 |
+| Knowledge graph engine | -- | Yes | Yes |
+| Auto-fix (secrets to .env) | -- | Yes | Yes |
+| Production error monitoring | -- | Yes | Yes |
+| MCP server tools | -- | Yes | Yes |
+| GitHub App (PR checks) | -- | -- | Yes |
+| Source map resolution | -- | -- | Yes |
 
 ```bash
-cd packages/api
-
-# Development
-npm run dev
-
-# Production (Docker)
-docker compose up -d
+shipsafe activate SS-PRO-yourkeyhere
 ```
 
-Runs on port 3747 by default.
+## Development
 
-## Architecture
+Requires Node.js >= 20.
+
+```bash
+# Install dependencies
+npm install
+
+# Build
+npm run build
+
+# Run CLI locally (without building)
+npm run dev -- scan
+npm run dev -- init
+npm run dev -- setup
+
+# Run tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Type-check without emitting
+npm run lint
+
+# Run cloud API locally
+cd packages/api && npm run dev
+```
+
+### Architecture
 
 ```
 bin/shipsafe.ts          CLI entry point (Commander.js)
 src/
   engines/
-    pattern/             Semgrep, Gitleaks, Trivy wrappers
+    builtin/             Pure TS pattern + secret + dependency scanners
+    pattern/             Scanner orchestration (Semgrep, Gitleaks, Trivy wrappers)
     graph/               Tree-sitter + KuzuDB knowledge graph
-  cli/                   CLI commands (scan, init, activate, config, etc.)
-  mcp/                   MCP server + tools
-  autofix/               Auto-fix engine (secrets, scaffolding, PR generation)
-  github/                GitHub App (webhooks, PR scanner, checks)
-  hooks/                 Git hook installer
-  config/                Config manager
+  cli/                   CLI commands (scan, init, activate, config, baseline, etc.)
+  mcp/                   MCP server + 7 tools (stdio transport)
+  autofix/               Auto-fix engine (secret fixer, scaffolding, PR generation)
+  github/                GitHub App (webhooks, PR scanner, checks API)
+  hooks/                 Git hook installer (pre-commit, pre-push)
+  config/                Global + project config manager
+  claude-md/             CLAUDE.md / .cursorrules injection manager
 packages/
-  api/                   Hono cloud API with SQLite
-  monitor/               @shipsafe/monitor client snippet
+  api/                   Hono cloud API with SQLite persistence
+  monitor/               @shipsafe/monitor client error capture snippet
 ```
 
-## Development
+### Conventions
 
-```bash
-# Run tests
-npm test
-
-# Build
-npm run build
-
-# Run CLI locally
-npm run dev -- scan
-npm run dev -- init
-```
+- TypeScript strict mode, ESM modules
+- Vitest for testing
+- No classes -- plain functions and types
+- Errors are thrown as typed errors, never swallowed silently
 
 ## License
 
-UNLICENSED — proprietary software by Connect Holdings LLC.
+UNLICENSED -- proprietary software by Connect Holdings LLC.
 
 `@shipsafe/monitor` is MIT licensed.
+
+---
+
+[shipsafe.org](https://shipsafe.org)

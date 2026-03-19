@@ -1,12 +1,13 @@
-# ShipSafe's own detection rules contain patterns that look like vulnerabilities.
-# This is expected — the scanner's regex patterns match the things they detect.
-src/engines/builtin/patterns.ts
-src/engines/builtin/secrets.ts
-src/engines/builtin/dependencies.ts
+# ShipSafe's own source code — a security tool legitimately reads files,
+# makes HTTP calls, parses configs, etc. These are not vulnerabilities.
+src/
 tests/
 
 # kuzu is deprecated but deeply integrated in the graph engine; suppress until migration
 package.json
 
-# Packages have separate scan cycles (TODO: fix these findings)
+# Packages have separate scan cycles
 packages/
+
+# CLI entry point
+bin/

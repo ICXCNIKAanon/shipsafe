@@ -3253,6 +3253,521 @@ const RULES: PatternRule[] = [
         /\bwindow\s*\.\s*open\s*\(\s*(?:userUrl|user_url|url|redirectUrl|redirect_url|targetUrl)\b/.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 11: Cryptographic Misuse (Advanced)
+  // ════════════════════════════════════════════
+  {
+    id: 'CRYPTO_ECB_MODE',
+    category: 'Insecure Cryptography',
+    description:
+      'ECB mode encryption detected — ECB does not use an IV and produces identical ciphertext for identical plaintext blocks, leaking data patterns.',
+    severity: 'high',
+    fix_suggestion:
+      'Use AES-256-GCM or AES-256-CBC with a random IV instead of ECB mode.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /createCipher(?:iv)?\s*\(\s*['"]aes-(?:128|192|256)-ecb['"]/.test(line);
+    },
+  },
+  {
+    id: 'CRYPTO_STATIC_IV',
+    category: 'Insecure Cryptography',
+    description:
+      'Static or zero-filled IV used with cipher — defeats the purpose of the IV and makes encryption deterministic.',
+    severity: 'high',
+    fix_suggestion:
+      'Generate a random IV for each encryption: crypto.randomBytes(16). Never reuse or hardcode IVs.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bcreateDecipheriv\b/.test(line) && !/\bcreateCipheriv\b/.test(line)) return false;
+      return /Buffer\s*\.\s*alloc\s*\(\s*(?:16|12|8)\s*\)/.test(line) ||
+        /Buffer\s*\.\s*from\s*\(\s*['"]0{16,}['"]/.test(line) ||
+        /\bnew\s+Uint8Array\s*\(\s*(?:16|12|8)\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'CRYPTO_HARDCODED_SALT',
+    category: 'Insecure Cryptography',
+    description:
+      'Hardcoded salt used for password hashing — a static salt negates the per-password uniqueness that salting provides.',
+    severity: 'high',
+    fix_suggestion:
+      'Generate a unique random salt per password: crypto.randomBytes(16). Store the salt alongside the hash.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      const lower = line.toLowerCase();
+      if (!lower.includes('salt')) return false;
+      // salt = "..." or salt: "..." with a string literal
+      if (/\bsalt\s*[:=]\s*['"][a-zA-Z0-9+/=_-]+['"]/.test(line)) {
+        // Must be in a hashing context
+        return /\b(?:hash|pbkdf2|scrypt|crypto|password)\b/i.test(line);
+      }
+      return false;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 12: OAuth / OpenID Connect
+  // ════════════════════════════════════════════
+  {
+    id: 'OAUTH_NO_PKCE',
+    category: 'Authentication Issues',
+    description:
+      'OAuth token exchange without PKCE (code_verifier missing) — vulnerable to authorization code interception attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Use PKCE: include code_verifier in the token exchange request and code_challenge in the authorization request.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect token exchange POST with grant_type=authorization_code but no code_verifier
+      if (!/\bgrant_type\s*[:=]\s*['"]authorization_code['"]/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return !/\bcode_verifier\b/.test(window);
+    },
+  },
+  {
+    id: 'OAUTH_ID_TOKEN_NO_VERIFY',
+    category: 'Authentication Issues',
+    description:
+      'OpenID Connect ID token decoded without signature verification — attackers can forge identity tokens.',
+    severity: 'high',
+    fix_suggestion:
+      'Verify ID token signatures using the provider\'s JWKS endpoint. Use a library like jose or openid-client to validate tokens.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect jwt.decode or atob/base64 decode of id_token without verify
+      if (!/\bid_token\b|id[-_]?[Tt]oken\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 3), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      const hasDecodeNoVerify = /\b(?:jwt\.decode|atob|JSON\.parse|Buffer\.from)\b/.test(window) &&
+        !/\b(?:jwt\.verify|verify|validate|jwks)\b/i.test(window);
+      return hasDecodeNoVerify;
+    },
+  },
+  {
+    id: 'OAUTH_REFRESH_TOKEN_LOCALSTORAGE',
+    category: 'Authentication Issues',
+    description:
+      'Refresh token stored in localStorage — accessible to JavaScript and XSS attacks. Refresh tokens grant long-term access.',
+    severity: 'high',
+    fix_suggestion:
+      'Store refresh tokens in httpOnly, secure cookies. Never store them in localStorage or sessionStorage.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:localStorage|sessionStorage)\s*\.\s*setItem\s*\(/.test(line)) return false;
+      return /refresh[-_]?[Tt]oken|refreshToken/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 13: Microservice Security
+  // ════════════════════════════════════════════
+  {
+    id: 'GRPC_NO_TLS',
+    category: 'Insecure Configuration',
+    description:
+      'gRPC server created with insecure credentials — traffic is unencrypted and vulnerable to interception.',
+    severity: 'high',
+    fix_suggestion:
+      'Use grpc.ServerCredentials.createSsl() with proper TLS certificates instead of createInsecure().',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bServerCredentials\s*\.\s*createInsecure\s*\(\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'TRUST_X_FORWARDED_FOR',
+    category: 'Header Injection',
+    description:
+      'X-Forwarded-For header trusted without proxy validation — easily spoofable, enabling IP-based auth bypass.',
+    severity: 'medium',
+    fix_suggestion:
+      'Only trust X-Forwarded-For when behind a known reverse proxy. Use app.set("trust proxy", 1) with Express and validate the proxy chain.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\breq\s*\.\s*headers?\s*\[\s*['"]x-forwarded-for['"]\s*\]/.test(line) &&
+          !/\breq\s*\.\s*(?:header|get)\s*\(\s*['"]x-forwarded-for['"]\s*\)/.test(line)) return false;
+      // Check if trust proxy is configured
+      const hasTrustProxy = /trust\s*proxy/i.test(ctx.fileContent);
+      return !hasTrustProxy;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 14: Serverless / Edge
+  // ════════════════════════════════════════════
+  {
+    id: 'LAMBDA_WILDCARD_IAM',
+    category: 'Cloud Misconfiguration',
+    description:
+      'Lambda/serverless function with wildcard IAM permissions (Action: * or Resource: *) — grants excessive privileges.',
+    severity: 'high',
+    fix_suggestion:
+      'Follow the principle of least privilege. Scope IAM permissions to specific actions and resources needed.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Check for Action: "*" or Resource: "*" patterns
+      if (!/(?:Action|Resource)\s*:\s*['"]?\*['"]?/.test(line)) return false;
+      // Verify it's in an IAM/policy context
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\b(?:iam|policy|Statement|Effect|Allow|Deny|Principal|lambda|serverless)\b/i.test(window);
+    },
+  },
+  {
+    id: 'SERVERLESS_CORS_UNRESTRICTED',
+    category: 'Insecure Configuration',
+    description:
+      'Serverless/edge function returns unrestricted CORS headers — any origin can access this endpoint.',
+    severity: 'medium',
+    fix_suggestion:
+      'Restrict Access-Control-Allow-Origin to specific trusted domains instead of "*".',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/Access-Control-Allow-Origin.*\*/.test(line)) return false;
+      // Verify serverless/edge context
+      const hasServerlessContext = /\b(?:handler|lambda|edge|serverless|export\s+(?:default\s+)?(?:async\s+)?function)\b/i.test(ctx.fileContent);
+      return hasServerlessContext;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 15: Data Validation Edge Cases
+  // ════════════════════════════════════════════
+  {
+    id: 'TYPE_COERCION_LOOSE_EQUALITY',
+    category: 'Data Handling',
+    description:
+      'Loose equality (==) used to compare security-sensitive values — type coercion can bypass checks (e.g., 0 == "" is true).',
+    severity: 'medium',
+    fix_suggestion:
+      'Use strict equality (===) for all comparisons, especially for authentication and authorization checks.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Look for == (not ===) comparing against security-sensitive string values
+      if (!/(?<!=)={2}(?!=)/.test(line)) return false;
+      if (/===/.test(line)) return false;
+      const lower = line.toLowerCase();
+      return (lower.includes('admin') || lower.includes('role') ||
+              lower.includes('auth') || lower.includes('permission')) &&
+             /\breq\s*\.\s*(?:body|query|params)\b/.test(line);
+    },
+  },
+  {
+    id: 'NULL_BYTE_INJECTION',
+    category: 'Injection',
+    description:
+      'Path or input containing null byte (%00 or \\0) — can truncate strings in C-based libraries, bypassing extension checks.',
+    severity: 'high',
+    fix_suggestion:
+      'Strip null bytes from user input before file operations. Validate that paths do not contain \\0 or %00.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:readFile(?:Sync)?|writeFile(?:Sync)?|createReadStream|open(?:Sync)?|access(?:Sync)?|unlink(?:Sync)?|stat(?:Sync)?|rename(?:Sync)?|readdir(?:Sync)?)\b/.test(line)) return false;
+      return /\\0|%00|\\x00/.test(line);
+    },
+  },
+  {
+    id: 'PROTOTYPE_POLLUTION_JSON_PARSE',
+    category: 'Prototype Pollution',
+    description:
+      'JSON.parse of user input without filtering __proto__ — parsed objects may contain __proto__ properties that pollute Object prototype.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use a JSON reviver to filter dangerous keys: JSON.parse(input, (key, value) => key === "__proto__" ? undefined : value). Or validate with a schema after parsing.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bJSON\s*\.\s*parse\s*\(/.test(line)) return false;
+      // Check if input comes from user
+      if (!/\breq\s*\.\s*(?:body|query)\b/.test(line) &&
+          !/\buserInput\b|\buser_input\b/.test(line)) return false;
+      // Check for reviver or schema validation nearby
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return !/\b(?:reviver|__proto__|schema|validate|zod|joi|ajv)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 16: Payment / Financial
+  // ════════════════════════════════════════════
+  {
+    id: 'PAYMENT_AMOUNT_FROM_CLIENT',
+    category: 'Payment Security',
+    description:
+      'Payment amount taken directly from client request without server-side validation — users can manipulate the charge amount.',
+    severity: 'critical',
+    fix_suggestion:
+      'Always compute payment amounts server-side from product prices in your database. Never trust client-supplied amounts.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Match amount/total from req.body on the same line
+      if (/\b(?:amount|unit_amount|total)\s*:\s*req\s*\.\s*(?:body|query)\b/.test(line)) {
+        return true;
+      }
+      // Check for payment-context line with req.body reference in nearby lines
+      if (!/\b(?:amount|unit_amount|total)\s*:/.test(line)) return false;
+      if (!/\breq\s*\.\s*(?:body|query)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\b(?:stripe|payment|charge|paymentIntent|checkout|price)\b/i.test(window);
+    },
+  },
+  {
+    id: 'PAYMENT_PRICE_FROM_CLIENT',
+    category: 'Payment Security',
+    description:
+      'Price ID taken from client without server-side lookup — attacker could substitute a cheaper price ID.',
+    severity: 'high',
+    fix_suggestion:
+      'Look up price IDs server-side based on the product/plan selected. Do not pass price IDs from the client.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bprice\s*:\s*req\s*\.\s*(?:body|query)\b/.test(line) &&
+          !/\bprice_?[Ii]d?\s*:\s*req\s*\.\s*(?:body|query)\b/.test(line)) return false;
+      // Verify payment context in surrounding lines
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\b(?:stripe|checkout|subscription|payment)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 17: Real-Time / Event-Driven
+  // ════════════════════════════════════════════
+  {
+    id: 'SOCKETIO_NO_AUTH',
+    category: 'Authentication Issues',
+    description:
+      'Socket.io server created without authentication middleware — any client can connect and send events.',
+    severity: 'high',
+    fix_suggestion:
+      'Add authentication middleware: io.use((socket, next) => { verifyToken(socket.handshake.auth.token) ? next() : next(new Error("unauthorized")); });',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bnew\s+Server\s*\(/.test(line) && !/\b(?:io|socketIo)\s*\(\s*(?:server|httpServer|app)/.test(line)) return false;
+      // Check if it's socket.io context
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 10))
+        .join(' ');
+      if (!/\b(?:socket\.io|io\.on|socket\.on|connection|disconnect)\b/i.test(window)) return false;
+      // Check for auth middleware
+      return !/\bio\s*\.\s*use\b/.test(ctx.fileContent) &&
+             !/\b(?:auth|authenticate|middleware|handshake\.auth)\b/i.test(window);
+    },
+  },
+  {
+    id: 'SSE_NO_AUTH',
+    category: 'Authentication Issues',
+    description:
+      'Server-Sent Events endpoint without authentication — allows unauthorized streaming data access.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add authentication middleware before SSE endpoints. Validate session/JWT before establishing the event stream.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Match text/event-stream content type setting
+      if (!/text\/event-stream/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 10), lineIdx + 1)
+        .join(' ');
+      return !/\b(?:auth|session|token|jwt|verify|middleware|requireAuth|isAuthenticated)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 18: Mobile API / JWT Advanced
+  // ════════════════════════════════════════════
+  {
+    id: 'TLS_REJECT_UNAUTHORIZED_PRODUCTION',
+    category: 'Insecure Configuration',
+    description:
+      'NODE_TLS_REJECT_UNAUTHORIZED set to 0 — disables all TLS certificate validation, allowing MITM attacks.',
+    severity: 'critical',
+    fix_suggestion:
+      'Remove NODE_TLS_REJECT_UNAUTHORIZED=0. Fix the underlying certificate issue instead.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]?0['"]?/.test(line) &&
+        /\bprocess\s*\.\s*env\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 19: Logging / Observability Security
+  // ════════════════════════════════════════════
+  {
+    id: 'LOG_SENSITIVE_DATA',
+    category: 'Sensitive Data Exposure',
+    description:
+      'Sensitive data passed to structured logger fields — passwords, tokens, and PII should never appear in log fields.',
+    severity: 'high',
+    fix_suggestion:
+      'Redact sensitive fields before logging. Use a log redaction library or configure your logger to mask sensitive keys.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:logger|log|winston|pino|bunyan)\s*\.\s*(?:info|warn|error|debug|log)\s*\(/.test(line)) return false;
+      // Check for sensitive field names in structured log object
+      return /\{\s*(?:[^}]*,\s*)?(?:password|secret|token|apiKey|api_key|ssn|creditCard|credit_card)\s*[,}:]/i.test(line);
+    },
+  },
+  {
+    id: 'METRICS_ENDPOINT_NO_AUTH',
+    category: 'Insecure Configuration',
+    description:
+      'Metrics endpoint (/metrics) exposed without authentication — leaks application internals and can aid attackers.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add authentication middleware to the /metrics endpoint or bind it to a separate internal port.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\s*\.\s*(?:get|use)\s*\(\s*['"]\/metrics['"]/.test(line)) return false;
+      // Check for auth middleware
+      return !/\b(?:auth|authenticate|requireAuth|middleware|protect|guard|basicAuth)\b/i.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 20: Comprehensive Edge Cases & Hardening
+  // ════════════════════════════════════════════
+  {
+    id: 'ERROR_MESSAGE_DATA_LEAK',
+    category: 'Sensitive Data Exposure',
+    description:
+      'Template literal in thrown error message may leak sensitive data like emails, IDs, or internal state to error handlers and logs.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use generic error messages for user-facing errors. Log detailed errors server-side only with a correlation ID.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bthrow\s+new\s+Error\s*\(\s*`/.test(line)) return false;
+      return /\$\{[^}]*(?:email|password|token|secret|ssn|creditCard|credit_card|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'REGEX_ANCHOR_MISSING',
+    category: 'Data Handling',
+    description:
+      'Regex used for route matching or authorization without proper anchoring (^ and $) — allows partial matches that bypass checks.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use properly anchored regex: /^\\/admin$/ instead of /\\/admin/. For route matching, prefer exact string matching.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match regex used in authorization/route context without ^ or $
+      if (!/\b(?:test|match|exec)\s*\(/.test(line)) return false;
+      const lower = line.toLowerCase();
+      if (!(lower.includes('admin') || lower.includes('auth') ||
+            lower.includes('protect') || lower.includes('route') ||
+            lower.includes('path') || lower.includes('url'))) return false;
+      // Check for a regex literal (/.../) containing security-sensitive paths but missing ^ or $
+      const regexLiteralMatch = line.match(/\/([^/]+)\//);
+      if (!regexLiteralMatch) return false;
+      const regexContent = regexLiteralMatch[1];
+      if (!/(?:admin|auth|api|private|secret)/i.test(regexContent)) return false;
+      // Missing anchoring if no ^ at start or $ at end of regex content
+      return !regexContent.startsWith('^') && !regexContent.includes('$');
+    },
+  },
+  {
+    id: 'CORS_INTERNAL_IP',
+    category: 'Insecure Configuration',
+    description:
+      'Hardcoded internal IP address in CORS origin — may expose internal services or be inaccessible in production.',
+    severity: 'low',
+    fix_suggestion:
+      'Use domain names and environment variables for CORS origins instead of hardcoded IP addresses.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\borigin\s*:/.test(line) && !/Access-Control-Allow-Origin/.test(line)) return false;
+      return /(?:10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)/.test(line);
+    },
+  },
 ];
 
 // ── File Discovery ──

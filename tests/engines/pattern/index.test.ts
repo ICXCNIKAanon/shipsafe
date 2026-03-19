@@ -80,8 +80,16 @@ describe('computeScore', () => {
     expect(computeScore([])).toBe('A');
   });
 
-  it('returns B when only info findings', () => {
-    expect(computeScore([makeFinding('info')])).toBe('B');
+  it('returns A when only info findings (info excluded from scoring)', () => {
+    expect(computeScore([makeFinding('info')])).toBe('A');
+  });
+
+  it('returns A when only env-example context findings', () => {
+    const envExampleFinding: Finding = {
+      ...makeFinding('critical'),
+      context: 'env-example',
+    };
+    expect(computeScore([envExampleFinding])).toBe('A');
   });
 
   it('returns B when only low findings', () => {

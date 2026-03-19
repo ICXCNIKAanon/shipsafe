@@ -10,6 +10,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, extname, relative, basename, resolve } from 'node:path';
 import type { Finding, Severity } from '../../types.js';
 import { loadIgnoreFilter } from './ignore.js';
+import { loadGitIgnoreFilter } from './gitignore.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -70,12 +71,23 @@ const PLACEHOLDER_PATTERNS = [
   /^sample/i,
   /^my[_-]?(api|secret|key|token|password)/i,
   /^(xxx+|yyy+|zzz+|aaa+|bbb+|000+|111+|123+)/i,
+  /^sk_test_/i,              // Stripe test keys
+  /^pk_test_/i,              // Stripe test publishable keys
+  /^sk_live_test/i,          // Stripe live test keys
+  /^whsec_test/i,            // Stripe webhook test secrets
+  /^rk_test_/i,              // Stripe restricted test keys
 ];
 
 function isPlaceholder(value: string): boolean {
   const trimmed = value.trim().replace(/['"` ]/g, '');
   if (trimmed.length < 8) return true;
   return PLACEHOLDER_PATTERNS.some((p) => p.test(trimmed));
+}
+
+// ── Localhost URL detection ─────────────────────────────────────────────────────
+
+function isLocalhostUrl(value: string): boolean {
+  return /^(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/(?:[^@]*@)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|::1)(?:[:\/]|$)/i.test(value);
 }
 
 // ── Comment / documentation line detection ─────────────────────────────────────
@@ -2072,7 +2084,13 @@ export async function scanSecrets(
 
   // Apply .shipsafeignore filter
   const ignoreFilter = await loadIgnoreFilter(resolve(targetPath));
-  const filesToScan = discovered.filter((f) => !ignoreFilter.isIgnored(f));
+
+  // Apply .gitignore filter — silently skips gitignored files (e.g., .env.local)
+  const gitIgnoreFilter = await loadGitIgnoreFilter(resolve(targetPath));
+
+  const filesToScan = discovered.filter(
+    (f) => !ignoreFilter.isIgnored(f) && !gitIgnoreFilter.isGitIgnored(f),
+  );
 
   // 2. Scan all files concurrently in controlled batches
   const findings: Finding[] = [];
@@ -2141,7 +2159,9 @@ async function scanFile(
   if (sample.includes('\0')) return [];
 
   const relativePath = relative(basePath, filePath);
-  const isEnvFile = basename(filePath).startsWith('.env');
+  const fileName = basename(filePath);
+  const isEnvFile = fileName.startsWith('.env');
+  const isEnvExample = fileName === '.env.example' || fileName === '.env.sample';
   const lines = content.split('\n');
   const findings: Finding[] = [];
 
@@ -2169,6 +2189,11 @@ async function scanFile(
       // Extract the captured group (secret value) or the full match
       const secretValue = match[1] ?? match[0];
 
+      // Skip localhost connection strings — not real secrets
+      if (isLocalhostUrl(secretValue) || isLocalhostUrl(line)) {
+        continue;
+      }
+
       // Placeholder check
       if (pattern.skipPlaceholders && isPlaceholder(secretValue)) {
         continue;
@@ -2193,17 +2218,23 @@ async function scanFile(
         if (!hasContext) continue;
       }
 
+      // Downgrade severity for .env.example / .env.sample files
+      const effectiveSeverity: Severity = isEnvExample ? 'info' : pattern.severity;
+
       findings.push({
         id: `builtin_${pattern.id}_${lineIdx + 1}`,
         engine: 'pattern',
-        severity: pattern.severity,
+        severity: effectiveSeverity,
         type: pattern.type,
         file: relativePath,
         line: lineIdx + 1,
-        description: pattern.description,
+        description: isEnvExample
+          ? `${pattern.description} (in example file — likely placeholder)`
+          : pattern.description,
         fix_suggestion:
           'Move this secret to an environment variable or secrets manager. Never commit secrets to source control.',
         auto_fixable: pattern.autoFixable,
+        ...(isEnvExample ? { context: 'env-example' as const } : {}),
       });
     }
   }

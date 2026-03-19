@@ -13,15 +13,20 @@ export interface PatternEngineOptions {
 }
 
 export function computeScore(findings: Finding[]): SecurityScore {
-  if (findings.length === 0) return 'A';
+  // Filter out info-level and env-example findings for scoring
+  const scorable = findings.filter(f =>
+    f.severity !== 'info' && f.context !== 'env-example'
+  );
 
-  const severities = new Set(findings.map((f) => f.severity));
+  if (scorable.length === 0) return 'A';
+
+  const severities = new Set(scorable.map((f) => f.severity));
 
   if (severities.has('critical')) return 'F';
   if (severities.has('high')) return 'D';
   if (severities.has('medium')) return 'C';
 
-  // Only info and/or low remain
+  // Only low remain
   return 'B';
 }
 

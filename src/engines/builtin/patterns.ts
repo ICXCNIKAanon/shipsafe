@@ -9,6 +9,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join, relative, resolve } from 'node:path';
 import type { Finding, Severity } from '../../types.js';
 import { loadIgnoreFilter, type IgnoreFilter } from './ignore.js';
+import { loadGitIgnoreFilter } from './gitignore.js';
 
 // ── Types ──
 
@@ -1664,7 +1665,13 @@ export async function scanPatterns(
 
   // Apply .shipsafeignore filter
   const ignoreFilter = await loadIgnoreFilter(resolve(targetPath));
-  const filesToScan = discovered.filter((f) => !ignoreFilter.isIgnored(f));
+
+  // Apply .gitignore filter — silently skips gitignored files (e.g., .env.local)
+  const gitIgnoreFilter = await loadGitIgnoreFilter(resolve(targetPath));
+
+  const filesToScan = discovered.filter(
+    (f) => !ignoreFilter.isIgnored(f) && !gitIgnoreFilter.isGitIgnored(f),
+  );
 
   const allFindings: Finding[] = [];
 

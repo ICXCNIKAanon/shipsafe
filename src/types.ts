@@ -14,6 +14,8 @@ export interface Finding {
   description: string;
   fix_suggestion: string;
   auto_fixable: boolean;
+  /** File context for scoring — e.g., 'gitignored', 'env-example', 'test-file' */
+  context?: string;
 }
 
 export interface ScanResult {

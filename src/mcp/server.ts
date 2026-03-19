@@ -8,6 +8,7 @@ import { handleProductionErrors } from './tools/production-errors.js';
 import { handleFix } from './tools/fix.js';
 import { handleVerifyResolution } from './tools/verify-resolution.js';
 import { handleCheckPackage } from './tools/check-package.js';
+import { handleEnvironmentScan } from './tools/environment-scan.js';
 
 export async function startMcpServer(): Promise<void> {
   const server = new McpServer({
@@ -130,6 +131,17 @@ export async function startMcpServer(): Promise<void> {
         version: params.version,
         registry: params.registry,
       });
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    },
+  );
+
+  // Register shipsafe_scan_environment tool
+  server.tool(
+    'shipsafe_scan_environment',
+    'Scan Claude Code environment for malicious MCP servers, hooks, skills, and prompt injection in CLAUDE.md files.',
+    {},
+    async () => {
+      const result = await handleEnvironmentScan();
       return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
     },
   );

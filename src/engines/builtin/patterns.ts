@@ -1280,6 +1280,8 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line) => {
       if (/process\s*\.\s*env\b/.test(line) || /os\s*\.\s*(?:environ|getenv)\b/.test(line)) return false;
+      // Skip localhost/dev connection strings — not production credentials
+      if (/@(?:localhost|127\.0\.0\.1|0\.0\.0\.0|::1)(?:[:/]|$)/i.test(line)) return false;
       // Match hardcoded connection strings: mongodb://, postgres://, mysql://, redis:// with credentials
       return /['"](?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis|amqp|mssql):\/\/[^'"]*:[^'"]*@[^'"]+['"]/.test(line);
     },

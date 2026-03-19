@@ -10,6 +10,7 @@ import { registerUploadSourcemapsCommand } from '../src/cli/upload-sourcemaps.js
 import { registerConfigCommand } from '../src/cli/config.js';
 import { registerInitCommand } from '../src/cli/init.js';
 import { registerBaselineCommand } from '../src/cli/baseline.js';
+import { registerScanEnvironmentCommand } from '../src/cli/scan-environment.js';
 
 const program = new Command();
 program
@@ -26,6 +27,7 @@ registerUploadSourcemapsCommand(program);
 registerConfigCommand(program);
 registerInitCommand(program);
 registerBaselineCommand(program);
+registerScanEnvironmentCommand(program);
 
 program
   .command('mcp-server')

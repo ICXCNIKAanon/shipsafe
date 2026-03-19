@@ -14651,6 +14651,1599 @@ const RULES: PatternRule[] = [
         /\b(?:json|text|body)\b/.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 71: API Gateway & Rate Limiting
+  // ════════════════════════════════════════════
+  {
+    id: 'RATE_LIMIT_WRITE_MISSING',
+    category: 'Rate Limiting',
+    description: 'Write endpoint (POST/PUT/DELETE) without rate limiting middleware.',
+    severity: 'high',
+    fix_suggestion: 'Apply per-endpoint rate limits to all write operations (POST, PUT, DELETE).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\.\s*(?:post|put|delete|patch)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 5).join(' ');
+      return !/\b(?:rateLimit|rateLimiter|throttle|limiter|slowDown)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'RATE_LIMIT_HEADERS_EXPOSED',
+    category: 'Rate Limiting',
+    description: 'Rate limit headers (X-RateLimit-Limit) expose exact limits to attackers.',
+    severity: 'low',
+    fix_suggestion: 'Consider omitting exact rate limit values from response headers or use generic headers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bsetHeader\s*\(\s*['"]X-RateLimit-(?:Limit|Remaining|Reset)['"]/.test(line) ||
+        /\bres\.set\s*\(\s*['"]X-RateLimit-Limit['"]/.test(line);
+    },
+  },
+  {
+    id: 'API_KEY_NOT_ROTATABLE',
+    category: 'Rate Limiting',
+    description: 'API key is stored as a static constant without rotation mechanism.',
+    severity: 'medium',
+    fix_suggestion: 'Store API keys in a secrets manager with automated rotation support.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bconst\s+API_KEY\s*=\s*['"][A-Za-z0-9_\-]{20,}['"]/.test(line);
+    },
+  },
+  {
+    id: 'RATE_LIMIT_IPV6_BYPASS',
+    category: 'Rate Limiting',
+    description: 'Rate limiter keyed on IP without normalizing IPv6 addresses — can be bypassed with different IPv6 representations.',
+    severity: 'medium',
+    fix_suggestion: 'Normalize IPv6 addresses before using them as rate limit keys. Use canonical form.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bkeyGenerator\s*:\s*.*\breq\.ip\b/.test(line) &&
+        !/\bnormalize|canonical|replace.*::/.test(line);
+    },
+  },
+  {
+    id: 'TOKEN_BUCKET_NO_BURST',
+    category: 'Rate Limiting',
+    description: 'Token bucket implementation without burst protection allows sudden traffic spikes.',
+    severity: 'medium',
+    fix_suggestion: 'Add a burst/maxBurst parameter to the token bucket to prevent sudden spikes.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bnew\s+TokenBucket\s*\(/.test(line) &&
+        !/\bburst\b|maxBurst\b/.test(line);
+    },
+  },
+  {
+    id: 'SLIDING_WINDOW_NOT_ATOMIC',
+    category: 'Rate Limiting',
+    description: 'Sliding window rate limiter with non-atomic read-then-write — race condition allows bypass.',
+    severity: 'high',
+    fix_suggestion: 'Use atomic operations (MULTI/EXEC, Lua scripts in Redis) for sliding window rate limiting.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:slidingWindow|sliding_window)\b/i.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 8), ctx.lineNumber + 8).join(' ');
+      return /\b(?:get|hget)\b/.test(nearby) && /\b(?:set|hset|incr)\b/.test(nearby) &&
+        !/\b(?:multi|pipeline|atomic|lua|eval)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'RATE_LIMIT_SESSION_UNVALIDATED',
+    category: 'Rate Limiting',
+    description: 'Rate limit keyed on session ID but session is not validated — attacker can forge session IDs.',
+    severity: 'high',
+    fix_suggestion: 'Validate sessions before using session IDs as rate limit keys.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bkeyGenerator\s*:\s*.*\bsession(?:Id|ID|_id)\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 10), ctx.lineNumber + 3).join(' ');
+      return !/\b(?:verifySession|validateSession|isAuthenticated|authenticate)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'GRAPHQL_QUERY_COST_NO_LIMIT',
+    category: 'Rate Limiting',
+    description: 'GraphQL endpoint without query cost/depth analysis — allows expensive queries.',
+    severity: 'high',
+    fix_suggestion: 'Add query cost analysis and depth limiting middleware to the GraphQL endpoint.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:graphqlHTTP|ApolloServer|createYoga|buildSchema)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 15).join(' ');
+      return !/\b(?:costAnalysis|queryCost|depthLimit|queryComplexity|maxDepth|costLimit)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'WEBSOCKET_MSG_RATE_MISSING',
+    category: 'Rate Limiting',
+    description: 'WebSocket message handler without per-message rate limiting — allows flood attacks.',
+    severity: 'medium',
+    fix_suggestion: 'Add per-connection message rate limiting to WebSocket handlers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:ws|socket|conn)\.on\s*\(\s*['"]message['"]/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:rateLimit|throttle|messageCount|msgRate|flood)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'FILE_UPLOAD_BANDWIDTH_UNLIMITED',
+    category: 'Rate Limiting',
+    description: 'File upload endpoint without bandwidth/size rate limiting.',
+    severity: 'medium',
+    fix_suggestion: 'Add bandwidth limits and per-user upload quotas to file upload endpoints.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:multer|busboy|formidable|upload)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:rateLimit|bandwidth|bytesPerSecond|maxRate)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'STREAMING_NO_TIMEOUT',
+    category: 'Rate Limiting',
+    description: 'Streaming/SSE endpoint without timeout — allows clients to hold connections indefinitely.',
+    severity: 'medium',
+    fix_suggestion: 'Add timeout and max-duration limits to streaming endpoints.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:text\/event-stream|EventSource|createReadStream|pipe\s*\(res)/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:timeout|setTimeout|maxDuration|deadline)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'LONG_POLL_NO_CONN_LIMIT',
+    category: 'Rate Limiting',
+    description: 'Long-polling endpoint without connection limit — allows resource exhaustion.',
+    severity: 'medium',
+    fix_suggestion: 'Limit concurrent long-poll connections per user/IP.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\blongPoll|long[_-]?poll/i.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:maxConnections|connectionLimit|concurrency)\b/i.test(nearby);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 72: Secrets Management
+  // ════════════════════════════════════════════
+  {
+    id: 'SECRET_ROTATION_MISSING',
+    category: 'Secrets Management',
+    description: 'Secret/credential without automated rotation — increases exposure window if compromised.',
+    severity: 'medium',
+    fix_suggestion: 'Implement automated secret rotation using a secrets manager (Vault, AWS Secrets Manager).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bprocess\.env\.(?:SECRET|PRIVATE_KEY|DB_PASSWORD)\b/.test(line)) return false;
+      const fileContent = ctx.fileContent;
+      return !/\b(?:rotateSecret|secretRotation|SecretManager|SecretsManager)\b/i.test(fileContent);
+    },
+  },
+  {
+    id: 'VAULT_TOKEN_HARDCODED',
+    category: 'Secrets Management',
+    description: 'HashiCorp Vault token is hardcoded — compromises the entire secrets store.',
+    severity: 'critical',
+    fix_suggestion: 'Use Vault auto-auth, AppRole, or Kubernetes auth instead of hardcoded tokens.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bVAULT_TOKEN\s*[:=]\s*['"][shv]\.[\w\-.]{20,}['"]/.test(line) ||
+        /\btoken\s*[:=]\s*['"]hvs\.[\w\-.]{20,}['"]/.test(line);
+    },
+  },
+  {
+    id: 'KMS_KEY_NO_ROTATION',
+    category: 'Secrets Management',
+    description: 'KMS key creation without rotation enabled — stale keys increase risk.',
+    severity: 'medium',
+    fix_suggestion: 'Enable automatic key rotation when creating KMS keys.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:createKey|CreateKeyCommand)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:EnableKeyRotation|keyRotation|rotationPeriod)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'SECRETS_IN_TERRAFORM_STATE',
+    category: 'Secrets Management',
+    description: 'Sensitive values in Terraform files without marking as sensitive — will appear in state.',
+    severity: 'high',
+    fix_suggestion: 'Mark sensitive variables with sensitive = true and use a remote encrypted backend.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bterraform\b.*\b(?:password|secret|api_key|token)\b/i.test(line) &&
+        !/\bsensitive\s*[:=]\s*true\b/.test(line);
+    },
+  },
+  {
+    id: 'ENV_IN_DOCKER_LAYERS',
+    category: 'Secrets Management',
+    description: 'Secrets copied into Docker image via COPY .env or ENV directive — persists in image layers.',
+    severity: 'high',
+    fix_suggestion: 'Use Docker secrets, BuildKit --mount=type=secret, or runtime env injection instead.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:COPY|ADD)\s+.*\.env\b/.test(line) &&
+        /\bDockerfile|dockerfile|docker/i.test(line);
+    },
+  },
+  {
+    id: 'SECRET_IN_GHA_OUTPUT',
+    category: 'Secrets Management',
+    description: 'Secret value written to GitHub Actions output — visible in logs and downstream steps.',
+    severity: 'high',
+    fix_suggestion: 'Use GitHub Actions masks (::add-mask::) or pass secrets via environment variables.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bcore\.setOutput\s*\(\s*['"][^'"]*(?:secret|token|password|key|credential)[^'"]*['"]/.test(line) ||
+        /::set-output\s+name=.*(?:secret|token|password|key)/i.test(line);
+    },
+  },
+  {
+    id: 'ENV_INJECTION_LD_PRELOAD',
+    category: 'Secrets Management',
+    description: 'LD_PRELOAD environment variable set from user input — allows library injection attacks.',
+    severity: 'critical',
+    fix_suggestion: 'Never allow user input to set LD_PRELOAD or similar loader variables.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:LD_PRELOAD|LD_LIBRARY_PATH|DYLD_INSERT_LIBRARIES)\s*[:=]/.test(line) &&
+        /\b(?:req\.|input|params|query|body|args|argv)\b/.test(line);
+    },
+  },
+  {
+    id: 'SECRET_TIMING_COMPARISON',
+    category: 'Secrets Management',
+    description: 'Secret/token compared with === or == — vulnerable to timing attacks.',
+    severity: 'high',
+    fix_suggestion: 'Use crypto.timingSafeEqual() for constant-time secret comparison.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:apiKey|api_key|secret|token|signature|hmac|digest)\s*(?:===?|!==?)\s*(?:req\.|header|body|params)/.test(line) ||
+        /\b(?:req\.|header|body|params).*(?:===?|!==?)\s*(?:apiKey|api_key|secret|token|signature|hmac|digest)\b/.test(line);
+    },
+  },
+  {
+    id: 'KEY_MATERIAL_NOT_ZEROED',
+    category: 'Secrets Management',
+    description: 'Cryptographic key material not zeroed after use — remains in memory.',
+    severity: 'medium',
+    fix_suggestion: 'Zero/fill key buffers after use (e.g., buffer.fill(0)) to minimize exposure window.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:privateKey|secretKey|keyMaterial|masterKey)\s*=\s*(?:Buffer|crypto|await)/.test(line)) return false;
+      const afterLines = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 20).join(' ');
+      return !/\b(?:fill\s*\(\s*0|zeroize|wipe|destroy|clear)\b/i.test(afterLines);
+    },
+  },
+  {
+    id: 'CERT_EXPIRY_NOT_MONITORED',
+    category: 'Secrets Management',
+    description: 'TLS certificate loaded without expiry monitoring — can cause outages.',
+    severity: 'medium',
+    fix_suggestion: 'Add certificate expiry monitoring and alerting before expiration.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:readFileSync|readFile)\s*\(.*\b(?:cert|certificate|\.pem|\.crt)\b/.test(line)) return false;
+      const fileContent = ctx.fileContent;
+      return !/\b(?:expiresAt|validTo|notAfter|certExpiry|renewBefore)\b/i.test(fileContent);
+    },
+  },
+  {
+    id: 'JWKS_NO_CACHE',
+    category: 'Secrets Management',
+    description: 'JWKS endpoint fetched on every request without caching — performance issue and potential DoS.',
+    severity: 'medium',
+    fix_suggestion: 'Cache JWKS responses with appropriate TTL and background refresh.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:jwks|\.well-known\/jwks)\b/i.test(line)) return false;
+      if (!/\bfetch\b|axios|got\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:cache|cached|memoize|ttl|lru)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'HMAC_KEY_SHARED_ACROSS_SERVICES',
+    category: 'Secrets Management',
+    description: 'HMAC key shared across multiple services — compromise of one service exposes all.',
+    severity: 'medium',
+    fix_suggestion: 'Use unique per-service HMAC keys and a key derivation function if needed.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bSHARED_HMAC_KEY\b|GLOBAL_HMAC_SECRET\b|COMMON_SIGNING_KEY\b/.test(line) ||
+        (/\bhmacKey\b/.test(line) && /\bshared\b|global\b|common\b/i.test(line));
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 73: Injection Variants
+  // ════════════════════════════════════════════
+  {
+    id: 'CRLF_LOG_INJECTION',
+    category: 'Injection',
+    description: 'User input written to logs without CRLF sanitization — allows log injection/forging.',
+    severity: 'medium',
+    fix_suggestion: 'Strip or encode \\r\\n characters from user input before logging.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:logger|log|console)\.\w+\s*\(.*\b(?:req\.body|req\.query|req\.params|req\.headers)\b/.test(line) &&
+        !/\b(?:sanitize|escape|replace|strip)\b/i.test(line);
+    },
+  },
+  {
+    id: 'TEMPLATE_INJECTION_EMAIL',
+    category: 'Injection',
+    description: 'User input in email template subject — template injection risk.',
+    severity: 'medium',
+    fix_suggestion: 'Sanitize user input before using in email templates. Escape template syntax.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bsubject\s*:\s*`[^`]*\$\{.*(?:req\.|user\.|input|name|body)/.test(line) ||
+        /\bsubject\s*:\s*.*\+\s*(?:req\.|user\.|input)/.test(line);
+    },
+  },
+  {
+    id: 'CSS_INJECTION_USER_STYLE',
+    category: 'Injection',
+    description: 'User-controlled CSS injected into page — can exfiltrate data via CSS selectors.',
+    severity: 'medium',
+    fix_suggestion: 'Validate and sanitize user CSS. Use a CSS sanitizer library or allowlist properties.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return (/\bstyle\s*=\s*[{`]/.test(line) || /\binnerHTML\s*=.*<style/.test(line)) &&
+        /\b(?:req\.|user\.|input|params|query|body)\b/.test(line);
+    },
+  },
+  {
+    id: 'SVG_XSS_UPLOAD',
+    category: 'Injection',
+    description: 'SVG file upload without sanitization — SVGs can contain JavaScript for XSS.',
+    severity: 'high',
+    fix_suggestion: 'Sanitize uploaded SVG files (remove <script>, event handlers) or convert to raster.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:\.svg|image\/svg|svg\+xml)\b/i.test(line)) return false;
+      if (!/\b(?:upload|accept|mimetype|content-type|fileFilter)\b/i.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:sanitize|DOMPurify|svgo|strip|clean)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'PDF_INJECTION_USER_CONTENT',
+    category: 'Injection',
+    description: 'User content injected into PDF generation without sanitization.',
+    severity: 'medium',
+    fix_suggestion: 'Sanitize and escape user content before including in PDF generation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (/\b(?:PDFDocument|jsPDF|puppeteer|pdf-lib|pdfkit)\b/.test(line) &&
+          /\b(?:req\.body|req\.query|req\.params|user\.input)\b/.test(line)) return true;
+      // Check nearby lines for PDF library + user input combination
+      if (!/\b(?:req\.body|req\.query|req\.params)\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber).join(' ');
+      return /\b(?:PDFDocument|jsPDF|puppeteer|pdf-lib|pdfkit)\b/.test(nearby);
+    },
+  },
+  {
+    id: 'MARKDOWN_XSS',
+    category: 'Injection',
+    description: 'Markdown rendered to HTML without sanitization — XSS via markdown content.',
+    severity: 'high',
+    fix_suggestion: 'Sanitize HTML output from markdown rendering (e.g., use DOMPurify on the result).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:marked|markdown-it|remark|showdown|snarkdown)\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 8).join(' ');
+      return !/\b(?:sanitize|DOMPurify|xss|purify|escape)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'REDOS_USER_PATTERN',
+    category: 'Injection',
+    description: 'User-supplied regex pattern compiled without protection — ReDoS risk.',
+    severity: 'high',
+    fix_suggestion: 'Use a safe regex library (re2, safe-regex) or validate/limit user regex patterns.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bnew\s+RegExp\s*\(\s*(?:req\.|user\.|input|params|query|body|args)/.test(line);
+    },
+  },
+  {
+    id: 'XPATH_INJECTION',
+    category: 'Injection',
+    description: 'XPath query built with user input — vulnerable to XPath injection.',
+    severity: 'high',
+    fix_suggestion: 'Use parameterized XPath queries or validate/escape user input.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:xpath|evaluate|select)\s*\(\s*[`'"]\s*\/\//.test(line) &&
+        /\$\{|"\s*\+/.test(line);
+    },
+  },
+  {
+    id: 'HEADER_INJECTION_MULTILINE',
+    category: 'Injection',
+    description: 'HTTP header set from user input without newline stripping — header injection via CRLF.',
+    severity: 'high',
+    fix_suggestion: 'Strip \\r and \\n from user input before using in HTTP headers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:setHeader|writeHead|header)\s*\(.*(?:req\.|user\.|input|params|query|body)/.test(line) &&
+        !/\b(?:replace|strip|sanitize|escape)\b/i.test(line) &&
+        !/\b(?:Content-Type|content-type|Authorization)\b/.test(line);
+    },
+  },
+  {
+    id: 'RESPONSE_SPLITTING',
+    category: 'Injection',
+    description: 'Response splitting via user-controlled header value — allows HTTP response splitting.',
+    severity: 'high',
+    fix_suggestion: 'Validate and sanitize all user input used in HTTP response headers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bres\.(?:setHeader|writeHead|header)\s*\(\s*['"]Location['"].*(?:req\.|query|params|body)/.test(line) &&
+        !/\b(?:encodeURI|sanitize|replace|URL)\b/.test(line);
+    },
+  },
+  {
+    id: 'CSV_FORMULA_INJECTION',
+    category: 'Injection',
+    description: 'CSV export with user data not sanitized for formula injection (=, +, -, @).',
+    severity: 'medium',
+    fix_suggestion: 'Prefix cells starting with =, +, -, @ with a single quote or tab to prevent formula execution.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:csv|createCsvStringifier|writeToStream|text\/csv|\.csv)\b/i.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:escapeFormula|sanitizeCSV|csvSanitize|formulaEscape|startsWith.*[=+\-@])\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'LINK_INJECTION_ERROR',
+    category: 'Injection',
+    description: 'User-controlled URL in error messages — can redirect users to malicious sites.',
+    severity: 'medium',
+    fix_suggestion: 'Validate and sanitize URLs in error messages. Use allowlisted redirect URLs.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:Error|error)\s*\(\s*`[^`]*(?:href|url|link)\s*[:=]\s*\$\{/.test(line) ||
+        /\bnew\s+Error\s*\(.*\b(?:req\.url|redirectUrl|returnUrl|next)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 74: Access Control
+  // ════════════════════════════════════════════
+  {
+    id: 'BATCH_PRIVILEGE_ESCALATION',
+    category: 'Access Control',
+    description: 'Batch operation without per-item authorization — allows horizontal privilege escalation.',
+    severity: 'high',
+    fix_suggestion: 'Check authorization for each item in batch operations, not just the batch as a whole.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:bulkUpdate|bulkDelete|batchUpdate|updateMany|deleteMany)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 8), ctx.lineNumber + 3).join(' ');
+      return !/\b(?:authorize|checkPermission|canAccess|isOwner|belongsTo)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'VERTICAL_ESCALATION_PARAM',
+    category: 'Access Control',
+    description: 'Role or permission set from request parameter — allows vertical privilege escalation.',
+    severity: 'critical',
+    fix_suggestion: 'Never derive roles/permissions from user input. Use server-side session/token claims.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (/\b(?:role|permission|isAdmin|is_admin|accessLevel)\s*=\s*(?:req\.body|req\.params|req\.query|body\.|params\.|query\.)/.test(line)) return true;
+      return false;
+    },
+  },
+  {
+    id: 'PERMISSION_CACHE_NO_INVALIDATION',
+    category: 'Access Control',
+    description: 'Permissions cached without invalidation — stale permissions after role changes.',
+    severity: 'medium',
+    fix_suggestion: 'Add cache invalidation when roles or permissions are updated.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:permissionCache|roleCache|authCache|aclCache)\b/.test(line)) return false;
+      if (!/\b(?:set|put|cache)\b/.test(line)) return false;
+      const fileContent = ctx.fileContent;
+      return !/\b(?:invalidate|delete|clear|flush|purge)\b/i.test(fileContent);
+    },
+  },
+  {
+    id: 'ROLE_HIERARCHY_BYPASS',
+    category: 'Access Control',
+    description: 'Role check without hierarchy — sub-roles may bypass higher role requirements.',
+    severity: 'medium',
+    fix_suggestion: 'Implement role hierarchy checks (admin inherits moderator permissions).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\brole\s*===?\s*['"]admin['"]/.test(line) &&
+        !/\b(?:includes|hierarchy|inherits|isAtLeast|hasRole)\b/i.test(line);
+    },
+  },
+  {
+    id: 'SHARED_RESOURCE_NO_TENANT',
+    category: 'Access Control',
+    description: 'Shared resource query without tenant/organization filter — data leak risk.',
+    severity: 'high',
+    fix_suggestion: 'Always include tenant/organization ID in queries for shared resources.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:findAll|findMany|select\s*\*|getAll)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 5).join(' ');
+      return /\bshared\b|multi[_-]?tenant/i.test(ctx.fileContent) &&
+        !/\b(?:tenantId|orgId|organizationId|tenant_id|org_id)\b/.test(nearby);
+    },
+  },
+  {
+    id: 'API_ENUM_TIMING',
+    category: 'Access Control',
+    description: 'API endpoint returns different timing for existing vs non-existing resources — enumeration risk.',
+    severity: 'medium',
+    fix_suggestion: 'Use constant-time responses for resource lookups. Return same status for exists/not-exists.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:findById|findOne|getUserBy)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 8).join(' ');
+      return /\bif\s*\(\s*!?\s*(?:user|resource|item|record)\s*\)/.test(nearby) &&
+        /\b(?:404|not.?found)\b/i.test(nearby) &&
+        !/\b(?:timingSafe|constantTime|sleep)\b/.test(nearby);
+    },
+  },
+  {
+    id: 'ADMIN_PANEL_PATH_ACCESS',
+    category: 'Access Control',
+    description: 'Admin panel accessible by predictable path without authentication middleware.',
+    severity: 'critical',
+    fix_suggestion: 'Protect admin routes with authentication and authorization middleware.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\.(?:use|get)\s*\(\s*['"]\/admin/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 2), ctx.lineNumber + 3).join(' ');
+      return !/\b(?:authenticate|isAdmin|requireAuth|authMiddleware|protect|guard|isAuthenticated)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'CAPABILITY_URL_NO_EXPIRY',
+    category: 'Access Control',
+    description: 'Capability URL (signed/token URL) generated without expiry — permanent access risk.',
+    severity: 'medium',
+    fix_suggestion: 'Add TTL/expiration to capability URLs. Use short-lived signed URLs.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:signedUrl|presignedUrl|getSignedUrl|createPresignedPost)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 2), ctx.lineNumber + 8).join(' ');
+      return !/\b(?:expires|expiresIn|Expires|ttl|maxAge)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'DELEGATION_NO_SCOPE',
+    category: 'Access Control',
+    description: 'Permission delegation without scope limits — delegated access may exceed intended scope.',
+    severity: 'high',
+    fix_suggestion: 'Always define explicit scopes and time limits when delegating permissions.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:delegate|delegateAccess|grantAccess|shareWith)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 8).join(' ');
+      return !/\b(?:scope|permission|limit|restrict|expires)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'IMPERSONATION_NO_AUDIT',
+    category: 'Access Control',
+    description: 'User impersonation without audit logging — actions cannot be traced.',
+    severity: 'high',
+    fix_suggestion: 'Log all impersonation events with impersonator identity and timestamp.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:impersonate|actAs|switchUser|loginAs|sudoAs)\b/i.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 8).join(' ');
+      return !/\b(?:audit|log|track|record|emit)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'SERVICE_NO_MTLS',
+    category: 'Access Control',
+    description: 'Service-to-service HTTP call without mutual TLS — allows service impersonation.',
+    severity: 'medium',
+    fix_suggestion: 'Use mutual TLS (mTLS) for service-to-service communication.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:INTERNAL_SERVICE_URL|SERVICE_URL|MICROSERVICE_URL)\b/.test(line) &&
+        /\bfetch\b|axios\b|got\b|http\.request/.test(line) &&
+        !/\b(?:cert|tls|ssl|mtls|certificate)\b/i.test(line);
+    },
+  },
+  {
+    id: 'CROSS_TENANT_DATA_LEAK',
+    category: 'Access Control',
+    description: 'Query joins or lookups across tenant boundaries without tenant ID filter.',
+    severity: 'critical',
+    fix_suggestion: 'Always filter by tenantId in multi-tenant queries. Use row-level security.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bJOIN\b.*\bON\b/i.test(line) &&
+        /(?:tenant|org_|organization)/i.test(line) &&
+        !/(?:tenant_id|tenantId|orgId|org_id)\s*=/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 75: Error & Exception Handling
+  // ════════════════════════════════════════════
+  {
+    id: 'UNCAUGHT_EXCEPTION_CONTINUE_V2',
+    category: 'Error Handling',
+    description: 'Uncaught exception handler that does not exit the process — leaves app in undefined state.',
+    severity: 'high',
+    fix_suggestion: 'Always call process.exit(1) after handling uncaughtException. Use graceful shutdown.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bprocess\.on\s*\(\s*['"]uncaughtException['"]/.test(line)) return false;
+      const afterLines = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 10).join(' ');
+      return !/\bprocess\.exit\b/.test(afterLines);
+    },
+  },
+  {
+    id: 'ERROR_LISTENER_LEAK',
+    category: 'Error Handling',
+    description: 'Event listener added in error handler but never removed — memory leak on repeated errors.',
+    severity: 'medium',
+    fix_suggestion: 'Remove event listeners in error/cleanup handlers to prevent memory leaks.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:catch|\.on\s*\(\s*['"]error)/.test(line)) return false;
+      const afterLines = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 8).join(' ');
+      return /\b(?:addEventListener|\.on\s*\(|addListener)\b/.test(afterLines) &&
+        !/\b(?:removeEventListener|\.off\s*\(|removeListener|removeAllListeners)\b/.test(afterLines);
+    },
+  },
+  {
+    id: 'CIRCULAR_REF_ERROR_SERIALIZE',
+    category: 'Error Handling',
+    description: 'Error object serialized with JSON.stringify without circular reference handling.',
+    severity: 'medium',
+    fix_suggestion: 'Use a safe serializer that handles circular references (e.g., flatted, safe-stable-stringify).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bJSON\.stringify\s*\(\s*(?:err|error|e)\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'STACK_TRACE_PRODUCTION',
+    category: 'Error Handling',
+    description: 'Stack trace exposed in production API response.',
+    severity: 'high',
+    fix_suggestion: 'Only include stack traces in development. Use generic error messages in production.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:res\.json|res\.send|response\.json)\s*\(\s*\{[^}]*\bstack\s*:\s*(?:err|error|e)\.stack/.test(line);
+    },
+  },
+  {
+    id: 'ERROR_PAGE_DEBUG_INFO',
+    category: 'Error Handling',
+    description: 'Error page renders debug information (stack, query, env) — information disclosure.',
+    severity: 'high',
+    fix_suggestion: 'Render generic error pages in production. Only show debug info in development.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:errorHandler|errorPage|renderError|handleError)\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 15).join(' ');
+      return /\b(?:stack|stackTrace|\.stack|process\.env|req\.query)\b/.test(nearby) &&
+        !/\bNODE_ENV\s*(?:===?|!==?)\s*['"](?:development|dev)['"]/.test(nearby);
+    },
+  },
+  {
+    id: 'ERROR_CLASS_INTERNAL_LEAK',
+    category: 'Error Handling',
+    description: 'Custom error class includes internal state (query, connection, config) in message.',
+    severity: 'medium',
+    fix_suggestion: 'Do not include internal state in error messages. Log internally, return generic messages.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bclass\s+\w*Error\s+extends\s+Error\b/.test(line) &&
+        /\bthis\.(?:query|sql|connection|config|dsn|connectionString)\b/.test(line);
+    },
+  },
+  {
+    id: 'RETRY_AUTH_NO_BACKOFF',
+    category: 'Error Handling',
+    description: 'Authentication retry without exponential backoff — allows credential brute force.',
+    severity: 'high',
+    fix_suggestion: 'Use exponential backoff with jitter for auth retries. Lock accounts after N failures.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bretry\b.*\b(?:auth|login|password|credential)\b/i.test(line) &&
+          !/\b(?:auth|login|password|credential)\b.*\bretry\b/i.test(line) &&
+          !/\bretryAuth\b|\bloginRetry\b|\bauthRetry\b|\bretryLogin\b/i.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:backoff|exponential|delay\s*\*|Math\.pow|jitter)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'ERROR_AGGREGATION_CONTEXT_LOSS',
+    category: 'Error Handling',
+    description: 'Error aggregation loses individual error context — makes debugging impossible.',
+    severity: 'low',
+    fix_suggestion: 'Preserve individual error details when aggregating errors.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\berrors\.length\b/.test(line) &&
+        /\bnew\s+Error\s*\(\s*[`'"].*\berrors?\b.*\blength\b/.test(line);
+    },
+  },
+  {
+    id: 'PANIC_DUMP_WITH_SECRETS',
+    category: 'Error Handling',
+    description: 'Crash/panic dump includes environment or process info — may contain secrets.',
+    severity: 'high',
+    fix_suggestion: 'Scrub environment variables and secrets from crash dumps before writing.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:crashDump|panicHandler|dumpState)\b/.test(line) &&
+        /\bprocess\.env\b/.test(line);
+    },
+  },
+  {
+    id: 'UNHANDLED_STREAM_ERROR',
+    category: 'Error Handling',
+    description: 'Stream created without error event handler — unhandled error will crash process.',
+    severity: 'high',
+    fix_suggestion: 'Always attach an error handler to streams (stream.on("error", handler)).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:createReadStream|createWriteStream)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 2), ctx.lineNumber + 8).join(' ');
+      return !/\.on\s*\(\s*['"]error['"]/.test(nearby) &&
+        !/\bpipeline\b/.test(nearby);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 76: Caching Security
+  // ════════════════════════════════════════════
+  {
+    id: 'CACHE_POISONING_HOST',
+    category: 'Caching',
+    description: 'Cache key derived from Host header — cache poisoning via Host header manipulation.',
+    severity: 'high',
+    fix_suggestion: 'Never use the Host header as part of cache keys. Validate Host against allowlist.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bcacheKey\b.*\breq\.(?:headers\.host|hostname)\b/.test(line) ||
+        /\bcache\.(?:set|put)\s*\(.*\breq\.(?:headers\.host|hostname)\b/.test(line);
+    },
+  },
+  {
+    id: 'SENSITIVE_DATA_CDN_CACHE',
+    category: 'Caching',
+    description: 'Response with sensitive data has public Cache-Control — will be cached by CDN.',
+    severity: 'high',
+    fix_suggestion: 'Use Cache-Control: private, no-store for responses with sensitive data.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bCache-Control['"]?\s*[:=,]\s*['"]?public\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 10), ctx.lineNumber + 10).join(' ');
+      return /\b(?:password|token|secret|credit.?card|ssn|email|phone|personal)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'CACHE_KEY_NO_USER_CONTEXT',
+    category: 'Caching',
+    description: 'Cache key does not include user/session context — serves cached data to wrong users.',
+    severity: 'high',
+    fix_suggestion: 'Include user ID or session ID in cache keys for user-specific data.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bcacheKey\s*=\s*/.test(line)) return false;
+      if (!/\breq\.(?:path|url|originalUrl)\b/.test(line)) return false;
+      return !/\b(?:userId|user_id|sessionId|session_id|req\.user)\b/.test(line);
+    },
+  },
+  {
+    id: 'STALE_CACHE_AFTER_PERM_CHANGE',
+    category: 'Caching',
+    description: 'Permission change does not invalidate related caches — stale access after role update.',
+    severity: 'high',
+    fix_suggestion: 'Invalidate user/role caches whenever permissions or roles are modified.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:updateRole|changePermission|revokeAccess|removeRole)\s*\(/.test(line)) return false;
+      const afterLines = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 10).join(' ');
+      return !/\b(?:invalidate|delete|clear|purge|flush|cache\.del)\b/i.test(afterLines);
+    },
+  },
+  {
+    id: 'NO_CACHE_CONTROL_SENSITIVE',
+    category: 'Caching',
+    description: 'Sensitive endpoint response without Cache-Control header — browser may cache.',
+    severity: 'medium',
+    fix_suggestion: 'Set Cache-Control: no-store, no-cache for sensitive endpoints.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/(?:\/api\/(?:user|profile|account|settings|billing)|\/me\b)/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join(' ');
+      if (!/\b(?:res\.json|res\.send)\b/.test(nearby)) return false;
+      return !/\bCache-Control\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'SHARED_CACHE_ACROSS_TENANTS',
+    category: 'Caching',
+    description: 'Cache shared across tenants without tenant-scoped keys — data leakage risk.',
+    severity: 'critical',
+    fix_suggestion: 'Prefix all cache keys with tenant ID in multi-tenant applications.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bcache\.(?:get|set|put)\s*\(/.test(line)) return false;
+      if (!/\b(?:tenant|multi.?tenant)\b/i.test(ctx.fileContent)) return false;
+      return !/\b(?:tenantId|tenant_id|orgId|org_id)\b/.test(line);
+    },
+  },
+  {
+    id: 'CACHE_STAMPEDE_NO_LOCK',
+    category: 'Caching',
+    description: 'Cache miss triggers expensive recomputation without lock — cache stampede risk.',
+    severity: 'medium',
+    fix_suggestion: 'Use cache lock/mutex, stale-while-revalidate, or probabilistic early recomputation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bcache\.get\b/.test(line)) return false;
+      const afterLines = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 10).join(' ');
+      return /\bif\s*\(\s*!/.test(afterLines) &&
+        /\b(?:database|db\.|fetch|query|compute)\b/.test(afterLines) &&
+        !/\b(?:lock|mutex|singleflight|swr|stale)\b/i.test(afterLines);
+    },
+  },
+  {
+    id: 'PROXY_CACHE_SET_COOKIE',
+    category: 'Caching',
+    description: 'Response with Set-Cookie header and public caching — leaks session cookies via cache.',
+    severity: 'high',
+    fix_suggestion: 'Never cache responses with Set-Cookie headers. Use Cache-Control: private.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bSet-Cookie\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 5).join(' ');
+      return /\bCache-Control['"]?\s*[:=,]\s*['"]?public\b/.test(nearby) ||
+        /\bs-maxage\b/.test(nearby);
+    },
+  },
+  {
+    id: 'CACHE_WITH_AUTH_TOKEN',
+    category: 'Caching',
+    description: 'Response containing auth token is cacheable — token leakage via shared cache.',
+    severity: 'high',
+    fix_suggestion: 'Ensure responses containing auth tokens have Cache-Control: no-store.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:accessToken|access_token|refreshToken|refresh_token|jwt)\b/.test(line)) return false;
+      if (!/\b(?:res\.json|res\.send|response\.json)\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 5).join(' ');
+      return !/\bno-store\b/.test(nearby);
+    },
+  },
+  {
+    id: 'VARY_HEADER_MISSING_AUTH',
+    category: 'Caching',
+    description: 'Cached response varies by auth but Vary header does not include Authorization.',
+    severity: 'medium',
+    fix_suggestion: 'Add Vary: Authorization header when response content depends on authentication.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bVary\b/.test(line)) return false;
+      if (!/\bsetHeader\s*\(\s*['"]Vary['"]/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 10), ctx.lineNumber + 10).join(' ');
+      return /\b(?:req\.user|isAuthenticated|authorization)\b/i.test(nearby) &&
+        !/\bAuthorization\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 77: File & Storage Security
+  // ════════════════════════════════════════════
+  {
+    id: 'SYMLINK_TRAVERSAL_ARCHIVE',
+    category: 'File Security',
+    description: 'Archive extraction without symlink validation — path traversal via symlinks in archives.',
+    severity: 'high',
+    fix_suggestion: 'Check for and reject symlinks when extracting archives. Validate resolved paths.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:extract|unzip|tar\.x|untar|decompress)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:symlink|followSymlink|noFollow|rejectSymlinks|lstat)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'WORLD_READABLE_TEMP',
+    category: 'File Security',
+    description: 'Temporary file created with world-readable permissions (0o666/0o777).',
+    severity: 'medium',
+    fix_suggestion: 'Create temp files with restrictive permissions (0o600) to prevent unauthorized access.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:writeFileSync|writeFile)\s*\(.*\b(?:tmp|temp)\b/.test(line) &&
+        /\bmode\s*:\s*0o(?:666|777|644)\b/.test(line);
+    },
+  },
+  {
+    id: 'FILE_LOCK_BYPASS',
+    category: 'File Security',
+    description: 'File operation without advisory lock — race condition with concurrent access.',
+    severity: 'medium',
+    fix_suggestion: 'Use file locking (flock, lockfile) for concurrent file access.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:readFileSync|writeFileSync)\s*\(/.test(line)) return false;
+      if (!/\bshared\b|concurrent|multi/i.test(ctx.fileContent)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 5).join(' ');
+      return !/\b(?:lock|flock|lockfile|mutex|semaphore)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'DIRECTORY_LISTING_ENABLED',
+    category: 'File Security',
+    description: 'Static file serving with directory listing enabled — exposes file structure.',
+    severity: 'medium',
+    fix_suggestion: 'Disable directory listing in static file serving configuration.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bserve-index\b/.test(line) ||
+        (/\bexpress\.static\b/.test(line) && /\bdirectory\s*:\s*true\b/.test(line));
+    },
+  },
+  {
+    id: 'STORAGE_BUCKET_NO_ENCRYPTION',
+    category: 'File Security',
+    description: 'Cloud storage bucket/container created without encryption at rest.',
+    severity: 'high',
+    fix_suggestion: 'Enable server-side encryption (SSE-S3, SSE-KMS) for storage buckets.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:createBucket|CreateBucketCommand|s3\.putObject)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:ServerSideEncryption|encryption|SSE|kmsKeyId)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'FILE_METADATA_USER_LEAK',
+    category: 'File Security',
+    description: 'File metadata (EXIF, author) not stripped from user uploads — leaks personal info.',
+    severity: 'medium',
+    fix_suggestion: 'Strip metadata (EXIF, XMP) from uploaded files before storing.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:upload|multer|formidable|busboy)\b/.test(line)) return false;
+      if (!/\b(?:image|photo|picture|jpeg|jpg|png)\b/i.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 15).join(' ');
+      return !/\b(?:exif|metadata|strip|sharp|imagemagick|removeExif)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'HARDLINK_SENSITIVE_FILE',
+    category: 'File Security',
+    description: 'Hard link created to potentially sensitive file — bypasses file permission changes.',
+    severity: 'medium',
+    fix_suggestion: 'Avoid hard links to sensitive files. Use copies or symlinks with proper validation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:linkSync|link)\s*\(.*(?:\/etc\/|passwd|shadow|\.key|\.pem|\.env)/.test(line);
+    },
+  },
+  {
+    id: 'SPARSE_FILE_DOS',
+    category: 'File Security',
+    description: 'File created from user-specified size without limits — sparse file DoS.',
+    severity: 'medium',
+    fix_suggestion: 'Validate and limit file sizes from user input to prevent disk space exhaustion.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:truncate|ftruncate|allocate)\s*\(.*(?:req\.|user\.|input|params|query|body|size)/.test(line);
+    },
+  },
+  {
+    id: 'INODE_EXHAUSTION_SMALL_FILES',
+    category: 'File Security',
+    description: 'User-controlled file creation without limit — inode exhaustion via many small files.',
+    severity: 'medium',
+    fix_suggestion: 'Limit the number of files users can create. Use quotas or cleanup policies.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:writeFile|createWriteStream)\s*\(/.test(line)) return false;
+      if (!/\b(?:forEach|map|for\s)\b/.test(ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber).join(' '))) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 8), ctx.lineNumber + 3).join(' ');
+      return /\b(?:req\.|user\.|input|items|files)\b/.test(nearby) &&
+        !/\b(?:limit|maxFiles|quota|count\s*[<>])\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'ACL_NOT_PROPAGATED',
+    category: 'File Security',
+    description: 'Parent directory ACL not propagated to child objects — inconsistent permissions.',
+    severity: 'medium',
+    fix_suggestion: 'Propagate ACLs to child objects or use inherited ACLs.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:mkdir|mkdirSync|createDirectory)\s*\(/.test(line)) return false;
+      if (!/\bacl\b|permissions?\b/i.test(ctx.fileContent)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 10).join(' ');
+      return !/\b(?:inherit|propagate|setACL|chmod)\b/i.test(nearby);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 78: Monitoring & Observability Security
+  // ════════════════════════════════════════════
+  {
+    id: 'METRICS_BUSINESS_DATA_EXPOSED',
+    category: 'Monitoring',
+    description: 'Metrics endpoint exposes business-sensitive data (revenue, user counts, etc.).',
+    severity: 'medium',
+    fix_suggestion: 'Protect metrics endpoints with authentication and limit exposed business metrics.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/(?:\/metrics|prometheus|prom-client)/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 15).join(' ');
+      return /(?:revenue|sales|profit|payment|billing|subscription)/i.test(nearby);
+    },
+  },
+  {
+    id: 'TRACE_CONTEXT_INJECTION',
+    category: 'Monitoring',
+    description: 'Trace context (traceparent/tracestate) accepted from untrusted input without validation.',
+    severity: 'medium',
+    fix_suggestion: 'Validate trace context headers and sanitize before propagating.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:traceparent|tracestate)\b/i.test(line) &&
+        /\breq\.headers\b/.test(line) &&
+        !/\b(?:validate|sanitize|parse|W3C)\b/i.test(line);
+    },
+  },
+  {
+    id: 'LOG_AGGREGATOR_NO_AUTH',
+    category: 'Monitoring',
+    description: 'Log aggregation/shipping endpoint without authentication — log injection risk.',
+    severity: 'high',
+    fix_suggestion: 'Require authentication on log ingestion endpoints.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/(?:\/logs\/ingest|\/api\/logs|logstash|fluentd)/i.test(line)) return false;
+      if (!/\b(?:app|router)\.(?:post|put)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 5).join(' ');
+      return !/\b(?:auth|authenticate|apiKey|token|bearer)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'ALERT_FATIGUE_NOISY',
+    category: 'Monitoring',
+    description: 'Alert threshold set too low — causes alert fatigue and missed real incidents.',
+    severity: 'low',
+    fix_suggestion: 'Tune alert thresholds based on baseline metrics. Use anomaly detection.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\balert\b.*\bthreshold\s*[:=]\s*(?:0|1)\b/.test(line) ||
+        /\btrigger.*\bcount\s*[><=]+\s*(?:0|1)\b/.test(line);
+    },
+  },
+  {
+    id: 'MONITORING_BLIND_SPOT_ERROR',
+    category: 'Monitoring',
+    description: 'Error handler/catch block without monitoring or alerting — silent failures.',
+    severity: 'medium',
+    fix_suggestion: 'Add monitoring/metrics emission in error handlers to detect failures.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bcatch\s*\(\s*(?:e|err|error)\s*\)\s*\{/.test(line)) return false;
+      const afterLines = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 5).join(' ');
+      return /\bconsole\.(?:log|error)\b/.test(afterLines) &&
+        !/\b(?:metrics|monitor|alert|sentry|datadog|newrelic|emit)\b/i.test(afterLines);
+    },
+  },
+  {
+    id: 'CUSTOM_METRIC_PII',
+    category: 'Monitoring',
+    description: 'Custom metric includes PII (email, name, IP) — violates privacy regulations.',
+    severity: 'high',
+    fix_suggestion: 'Never include PII in metric labels. Use anonymized identifiers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b\w*(?:counter|gauge|histogram|summary)\w*\.(?:labels|observe|inc)\s*\(/i.test(line) &&
+        /\b(?:email|userName|ip|address|phone|ssn|username)\b/.test(line);
+    },
+  },
+  {
+    id: 'HEALTH_ENDPOINT_VERSION_LEAK',
+    category: 'Monitoring',
+    description: 'Health endpoint reveals application version — aids targeted attacks.',
+    severity: 'low',
+    fix_suggestion: 'Only expose version info on authenticated health endpoints.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/(?:\/health|\/healthz|\/readyz|\/livez)\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join(' ');
+      return /\b(?:version|nodeVersion|appVersion|process\.version)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'STATUS_PAGE_INTERNAL_IPS',
+    category: 'Monitoring',
+    description: 'Status page or health response includes internal IP addresses.',
+    severity: 'medium',
+    fix_suggestion: 'Remove internal IP addresses from status/health responses.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/(?:\/status|statusPage|\/health)/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join(' ');
+      return /\b(?:internalIp|privateIp|hostname|os\.hostname|networkInterfaces)\b/.test(nearby);
+    },
+  },
+  {
+    id: 'APM_FULL_REQUEST_CAPTURE',
+    category: 'Monitoring',
+    description: 'APM agent configured to capture full request bodies — may capture sensitive data.',
+    severity: 'high',
+    fix_suggestion: 'Configure APM to redact sensitive fields from captured requests.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:captureBody|capture_body)\s*[:=]\s*['"](?:all|on|true)['"]/.test(line) ||
+        /\bcaptureHeaders\s*[:=]\s*true\b/.test(line);
+    },
+  },
+  {
+    id: 'PROFILER_PRODUCTION',
+    category: 'Monitoring',
+    description: 'Profiler endpoint exposed in production — performance data and potential DoS.',
+    severity: 'high',
+    fix_suggestion: 'Disable profiler endpoints in production or require strong authentication.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/(?:\/profiler|\/heap|\/profile\b)/.test(line)) return false;
+      if (!/\b(?:app|router)\.(?:get|use)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 5).join(' ');
+      return !/\b(?:authenticate|isAdmin|requireAuth|NODE_ENV|production)\b/i.test(nearby);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 79: CI/CD & Build Security
+  // ════════════════════════════════════════════
+  {
+    id: 'BUILD_ARTIFACT_EMBEDDED_SECRET',
+    category: 'CI/CD',
+    description: 'Build artifact may embed secrets via environment variable interpolation.',
+    severity: 'high',
+    fix_suggestion: 'Use runtime environment injection instead of build-time secret embedding.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bdefinePlugin\b|DefinePlugin\b/.test(line) &&
+        /\bprocess\.env\.(?:SECRET|API_KEY|PRIVATE_KEY|PASSWORD|TOKEN)\b/.test(line);
+    },
+  },
+  {
+    id: 'GHA_PULL_REQUEST_TARGET',
+    category: 'CI/CD',
+    description: 'GitHub Action uses pull_request_target with checkout — allows code injection from forks.',
+    severity: 'critical',
+    fix_suggestion: 'Avoid checkout in pull_request_target workflows. Use pull_request event instead.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bpull_request_target\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 10).join(' ');
+      return /\bcheckout\b|actions\/checkout/.test(nearby);
+    },
+  },
+  {
+    id: 'NPM_PUBLISH_NO_2FA',
+    category: 'CI/CD',
+    description: 'npm publish without 2FA enforcement — allows unauthorized package publishing.',
+    severity: 'high',
+    fix_suggestion: 'Enable npm 2FA for publishing: npm profile enable-2fa auth-and-writes.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bnpm\s+publish\b/.test(line) &&
+        !/\b(?:--otp|--auth-type|2fa|provenance)\b/.test(line);
+    },
+  },
+  {
+    id: 'DOCKER_BUILD_ARGS_SECRET',
+    category: 'CI/CD',
+    description: 'Docker build uses ARG for secrets — secrets persist in image layer history.',
+    severity: 'high',
+    fix_suggestion: 'Use BuildKit --mount=type=secret instead of ARG for sensitive values.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /--build-arg\b.*(?:SECRET|PASSWORD|TOKEN|API_KEY|PRIVATE_KEY)/i.test(line);
+    },
+  },
+  {
+    id: 'CI_ENV_INJECTION',
+    category: 'CI/CD',
+    description: 'CI environment variable set from untrusted PR input — command injection risk.',
+    severity: 'critical',
+    fix_suggestion: 'Sanitize PR inputs (title, body, labels) before using in CI environment.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bgithub\.event\.pull_request\.(?:title|body|head\.ref)\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 5).join(' ');
+      return /GITHUB_ENV|process\.env|setEnv|set-env/.test(nearby);
+    },
+  },
+  {
+    id: 'UNPINNED_ACTION_VERSION',
+    category: 'CI/CD',
+    description: 'GitHub Action pinned to branch/tag instead of SHA — supply chain risk.',
+    severity: 'medium',
+    fix_suggestion: 'Pin GitHub Actions to full SHA hashes instead of branch/tag references.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\buses:\s+[\w\-]+\/[\w\-]+@(?:v\d|main|master)\b/.test(line) &&
+        !/\b[a-f0-9]{40}\b/.test(line);
+    },
+  },
+  {
+    id: 'SELF_HOSTED_RUNNER_NO_ISOLATION',
+    category: 'CI/CD',
+    description: 'Self-hosted runner without isolation — previous job artifacts may leak.',
+    severity: 'high',
+    fix_suggestion: 'Use ephemeral self-hosted runners or container isolation for each job.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bself-hosted\b/.test(line)) return false;
+      if (!/\bruns-on\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:ephemeral|container|docker|clean)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'ARTIFACT_UPLOAD_NO_ENCRYPTION',
+    category: 'CI/CD',
+    description: 'CI artifact upload without encryption — sensitive build outputs exposed.',
+    severity: 'medium',
+    fix_suggestion: 'Encrypt sensitive artifacts before uploading in CI pipelines.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bupload-artifact\b|upload.*artifact/i.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 10).join(' ');
+      return /\b(?:secret|key|credential|token|\.env)\b/i.test(nearby) &&
+        !/\b(?:encrypt|gpg|age|sealed)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'DEPLOY_WEBHOOK_NO_AUTH',
+    category: 'CI/CD',
+    description: 'Deployment webhook endpoint without authentication — allows unauthorized deployments.',
+    severity: 'critical',
+    fix_suggestion: 'Require webhook secret verification for deployment triggers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/(?:\/deploy|\/webhook\/deploy|\/api\/deploy)/.test(line)) return false;
+      if (!/\b(?:app|router)\.(?:post|put|get)\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 8).join(' ');
+      return !/\b(?:verifySignature|authenticate|secret|hmac|token|bearer|apiKey)\b/i.test(nearby);
+    },
+  },
+  {
+    id: 'BUILD_CACHE_POISONING',
+    category: 'CI/CD',
+    description: 'Build cache restored without integrity check — cache poisoning risk.',
+    severity: 'medium',
+    fix_suggestion: 'Verify cache integrity with checksums. Use separate caches for different branches.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:actions\/cache|cache-restore|restoreCache)\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), ctx.lineNumber + 10).join(' ');
+      return !/\b(?:hashFiles|checksum|integrity|verify)\b/i.test(nearby);
+    },
+  },
 ];
 
 // ── File Discovery ──

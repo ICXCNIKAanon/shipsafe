@@ -4513,6 +4513,644 @@ const RULES: PatternRule[] = [
       return /`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{[^}]+\}[^`]*`/i.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 21: Regex & Input Parsing
+  // ════════════════════════════════════════════
+  {
+    id: 'REGEX_USER_INPUT_UNESCAPED',
+    category: 'Regex DoS',
+    description:
+      'User input passed directly to new RegExp() without escaping — enables ReDoS and regex injection attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Escape user input before passing to RegExp constructor. Use a helper like escapeRegExp(input) or the escape-string-regexp library.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bnew\s+RegExp\s*\(/.test(line)) return false;
+      // Detect user input directly in RegExp without escaping
+      const hasUserInput = /\bnew\s+RegExp\s*\(\s*(?:req\s*\.\s*(?:body|query|params)|userInput|searchTerm|filterText|searchQuery)\b/.test(line);
+      const hasEscape = /\b(?:escape|escapeRegExp|escapeStringRegexp|sanitize)\b/i.test(line);
+      return hasUserInput && !hasEscape;
+    },
+  },
+  {
+    id: 'HTTP_PARAM_POLLUTION',
+    category: 'Input Validation',
+    description:
+      'HTTP parameter used without array check — duplicate parameters can bypass validation via HTTP Parameter Pollution.',
+    severity: 'medium',
+    fix_suggestion:
+      'Always validate that query parameters are strings, not arrays. Use typeof check or a validation library to handle duplicate params.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect req.query.param used directly in security-sensitive context without type check
+      if (!/\breq\.query\.\w+/.test(line)) return false;
+      // Check surrounding context for security-sensitive operations
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 3), Math.min(ctx.allLines.length, lineIdx + 4)).join(' ');
+      const hasSensitiveOp = /\b(?:WHERE|SELECT|password|token|auth|admin|role|redirect|url)\b/i.test(window);
+      const hasTypeCheck = /\btypeof\s+.*===?\s*['"]string['"]/.test(window) ||
+        /\bArray\.isArray\b/.test(window) ||
+        /\bString\s*\(/.test(window) ||
+        /\bz\.string\b/.test(window);
+      return hasSensitiveOp && !hasTypeCheck;
+    },
+  },
+  {
+    id: 'UNICODE_CASE_FOLDING_BYPASS',
+    category: 'Input Validation',
+    description:
+      'Security check uses case-insensitive comparison without Unicode normalization — Unicode case-folding can bypass blocklists.',
+    severity: 'medium',
+    fix_suggestion:
+      'Normalize input with str.normalize("NFC") or str.normalize("NFKC") before security checks. Use Unicode-aware comparison.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect toLowerCase/toUpperCase used in security checks without normalize
+      if (!/\.(?:toLowerCase|toUpperCase)\s*\(\s*\)/.test(line)) return false;
+      const hasSecurityCheck = /\b(?:includes|indexOf|match|test|startsWith|endsWith)\s*\(.*(?:admin|root|script|javascript|__proto__|constructor)\b/i.test(line);
+      const hasNormalize = /\.normalize\s*\(/.test(line);
+      return hasSecurityCheck && !hasNormalize;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 22: Memory & Buffer Safety
+  // ════════════════════════════════════════════
+  {
+    id: 'BUFFER_ALLOC_UNSAFE_LEAK',
+    category: 'Memory Safety',
+    description:
+      'Buffer.allocUnsafe() used — returns uninitialized memory that may contain sensitive data from previous allocations.',
+    severity: 'high',
+    fix_suggestion:
+      'Use Buffer.alloc() instead of Buffer.allocUnsafe(). It zero-fills the buffer, preventing uninitialized memory leaks.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bBuffer\.allocUnsafe\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'BUFFER_DEPRECATED_CONSTRUCTOR',
+    category: 'Memory Safety',
+    description:
+      'Deprecated Buffer() constructor used with user-controlled size — can cause denial-of-service or uninitialized memory exposure.',
+    severity: 'high',
+    fix_suggestion:
+      'Use Buffer.alloc(size) for zero-filled buffers or Buffer.from(data) for data conversion. The Buffer() constructor is deprecated.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect new Buffer(variable) or Buffer(variable) — deprecated constructor
+      if (/\bnew\s+Buffer\s*\(\s*(?:req|user|input|size|len|length|n|count)\b/.test(line)) return true;
+      if (/(?<!\w)Buffer\s*\(\s*(?:req|user|input|size|len|length|n|count)\b/.test(line) &&
+        !/\bBuffer\.\w+\s*\(/.test(line)) return true;
+      return false;
+    },
+  },
+  {
+    id: 'INTEGER_OVERFLOW_ALLOC',
+    category: 'Memory Safety',
+    description:
+      'Arithmetic on allocation size without overflow check — integer overflow can cause undersized buffer allocation.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate allocation sizes with explicit bounds checking. Use Number.isSafeInteger() and set maximum size limits before allocation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect Buffer.alloc/allocUnsafe or new ArrayBuffer with arithmetic on size
+      return /\b(?:Buffer\.alloc(?:Unsafe)?|new\s+ArrayBuffer|new\s+Uint8Array)\s*\(\s*\w+\s*[*+]\s*\w+/.test(line) &&
+        !/\bNumber\.isSafeInteger\b/.test(line) &&
+        !/\bMath\.min\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 23: Async Security Patterns
+  // ════════════════════════════════════════════
+  {
+    id: 'ASYNC_AUTH_NO_AWAIT',
+    category: 'Authentication',
+    description:
+      'Async authorization function called without await — check always resolves to truthy Promise, bypassing auth.',
+    severity: 'critical',
+    fix_suggestion:
+      'Always use await when calling async authorization functions: if (await isAuthorized(user)). A Promise is always truthy.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect if (isAuthorized(user)) or if (checkAuth(user)) without await
+      if (!/\bif\s*\(\s*(?:isAuthorized|checkAuth|isAdmin|hasPermission|canAccess|isAuthenticated|verifyToken|validateSession)\s*\(/.test(line)) return false;
+      // Make sure there's no await
+      if (/\bawait\s+(?:isAuthorized|checkAuth|isAdmin|hasPermission|canAccess|isAuthenticated|verifyToken|validateSession)\b/.test(line)) return false;
+      // Check if the function is declared as async in nearby context
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 15), lineIdx).join('\n');
+      return /\basync\s+function\s+(?:isAuthorized|checkAuth|isAdmin|hasPermission|canAccess|isAuthenticated|verifyToken|validateSession)\b/.test(window) ||
+        /\b(?:isAuthorized|checkAuth|isAdmin|hasPermission|canAccess|isAuthenticated|verifyToken|validateSession)\s*=\s*async\b/.test(window) ||
+        // Also flag if the function itself is in an async context (async handler)
+        /\basync\s+(?:function|\()/.test(ctx.allLines[lineIdx - 1] || '') ||
+        /\basync\s+(?:function|\()/.test(ctx.allLines[lineIdx - 2] || '');
+    },
+  },
+  {
+    id: 'UNHANDLED_REJECTION_AUTH',
+    category: 'Authentication',
+    description:
+      'Security-critical async operation without error handling — unhandled rejection could silently skip auth checks.',
+    severity: 'high',
+    fix_suggestion:
+      'Wrap security-critical async operations in try/catch blocks. An unhandled rejection in auth code could allow unauthorized access.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect auth-related promises without catch or try/catch
+      if (!/\b(?:verifyToken|validateSession|checkPermission|authenticate)\s*\(/.test(line)) return false;
+      if (/\bawait\b/.test(line)) {
+        // Check if inside try block
+        const lineIdx = ctx.lineNumber - 1;
+        const before = ctx.allLines.slice(Math.max(0, lineIdx - 10), lineIdx).join('\n');
+        return !/\btry\s*\{/.test(before);
+      }
+      // Promise without .catch
+      if (/\.then\s*\(/.test(line) && !/\.catch\s*\(/.test(line)) return true;
+      return false;
+    },
+  },
+  {
+    id: 'PROMISE_ALL_AUTH_NO_BOUNDARY',
+    category: 'Authentication',
+    description:
+      'Promise.all used for auth checks without error boundaries — one failure rejects all, potentially bypassing remaining checks.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use Promise.allSettled() for multiple auth checks, or wrap each in try/catch. Promise.all fails fast — one rejection skips remaining checks.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bPromise\.all\s*\(/.test(line)) return false;
+      return /(?:auth|permission|access|role|token|verify|validate)/i.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 24: Docker & CI/CD
+  // ════════════════════════════════════════════
+  {
+    id: 'DOCKER_COMPOSE_SECRET_ENV',
+    category: 'Hardcoded Secrets',
+    description:
+      'Secret value hardcoded in docker-compose environment section — exposed in version control and container inspection.',
+    severity: 'high',
+    fix_suggestion:
+      'Use env_file directive or ${VARIABLE} syntax referencing .env files. Never hardcode API keys or tokens in docker-compose.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect environment variable assignments with secret-sounding names and literal values
+      if (!/\b(?:API_KEY|SECRET_KEY|AUTH_TOKEN|PRIVATE_KEY|ACCESS_TOKEN|DATABASE_URL)\s*[:=]/.test(line)) return false;
+      // Must have a literal value, not a variable reference
+      const hasLiteralValue = /[:=]\s*['"]?(?:sk_|pk_|ghp_|gho_|AKIA|mongodb\+srv|postgres:\/\/|mysql:\/\/)[^\s'"]*/.test(line);
+      const hasEnvRef = /\$\{/.test(line) || /process\s*\.\s*env\b/.test(line);
+      return hasLiteralValue && !hasEnvRef;
+    },
+  },
+  {
+    id: 'DOCKERFILE_NPM_INSTALL_NO_LOCK',
+    category: 'Supply Chain',
+    description:
+      'RUN npm install in Dockerfile without lockfile — may install different package versions in production vs development.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use "RUN npm ci" instead of "RUN npm install" in Dockerfiles. npm ci uses the lockfile for deterministic builds.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect RUN npm install (without --ci flag) in Dockerfile-like content
+      return /\bRUN\s+npm\s+install\b/.test(line) &&
+        !/\bnpm\s+ci\b/.test(line);
+    },
+  },
+  {
+    id: 'DOCKER_LATEST_TAG_PRODUCTION',
+    category: 'Supply Chain',
+    description:
+      'Docker image uses :latest tag — non-deterministic builds may pull different versions, breaking production.',
+    severity: 'medium',
+    fix_suggestion:
+      'Pin Docker images to specific versions or SHA digests (e.g., node:20.11.0-alpine or node@sha256:...) for reproducible builds.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect FROM image:latest in Dockerfile-like content
+      return /\bFROM\s+\w+(?:\/\w+)?:latest\b/.test(line);
+    },
+  },
+  {
+    id: 'DEBUG_INSPECT_EXPOSED',
+    category: 'Configuration',
+    description:
+      'Node.js --inspect bound to 0.0.0.0 — exposes debugger to the network, allowing remote code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Bind --inspect to localhost only (--inspect=127.0.0.1:9229). Never expose the debug port on all interfaces in production.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /--inspect(?:=|-brk=)0\.0\.0\.0/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 25: Secrets in Frontend
+  // ════════════════════════════════════════════
+  {
+    id: 'FIREBASE_ADMIN_IN_CLIENT',
+    category: 'Hardcoded Secrets',
+    description:
+      'Firebase Admin SDK imported in client-side file (.tsx) — Admin SDK credentials should never be in browser code.',
+    severity: 'critical',
+    fix_suggestion:
+      'Move Firebase Admin SDK usage to server-side code only (API routes, server components). Use the client SDK (firebase/app) in frontend code.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bfirebase-admin\b/.test(line)) return false;
+      // Only flag in client-side files (.tsx, .jsx) or files without 'server' in path
+      const isClientFile = ctx.filePath.endsWith('.tsx') || ctx.filePath.endsWith('.jsx');
+      const hasServerIndicator = /(?:server|api|backend|admin)/.test(ctx.filePath.toLowerCase());
+      return isClientFile && !hasServerIndicator;
+    },
+  },
+  {
+    id: 'VITE_DEFINE_SECRET',
+    category: 'Hardcoded Secrets',
+    description:
+      'Vite define config exposes secret value — define values are inlined into client-side bundle at build time.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never pass secrets through Vite define. Use server-side API routes for secret operations. Only expose public values via define.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bdefine\s*:/.test(line) && !/\bdefine\s*\(/.test(line)) return false;
+      return /\b(?:SECRET|API_KEY|PRIVATE_KEY|TOKEN|PASSWORD|CREDENTIAL)\b/i.test(line) &&
+        /['"][a-zA-Z0-9_-]{8,}['"]/.test(line) &&
+        !/process\s*\.\s*env\b/.test(line);
+    },
+  },
+  {
+    id: 'NEXT_PUBLIC_SECRET_NAME',
+    category: 'Hardcoded Secrets',
+    description:
+      'NEXT_PUBLIC_ environment variable with secret/key/password in name — these values are exposed to the browser.',
+    severity: 'high',
+    fix_suggestion:
+      'Remove the NEXT_PUBLIC_ prefix from secret environment variables. Access server-only secrets via API routes or server components.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bNEXT_PUBLIC_\w*(?:SECRET|PASSWORD|PRIVATE_KEY|ADMIN_KEY|DB_PASS|AUTH_KEY)\b/i.test(line);
+    },
+  },
+  {
+    id: 'API_KEY_LITERAL_REACT',
+    category: 'Hardcoded Secrets',
+    description:
+      'API key string literal in React/frontend component — exposed in client-side JavaScript bundle.',
+    severity: 'critical',
+    fix_suggestion:
+      'Move API keys to server-side code. Use environment variables via server API routes, never hardcode in components.',
+    auto_fixable: false,
+    fileTypes: ['.tsx', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect API key patterns directly in component files
+      if (!/\b(?:apiKey|api_key|API_KEY)\s*[:=]\s*['"]/.test(line)) return false;
+      // Must have a real-looking key value, not a placeholder
+      return /['"](?:sk_live_|pk_live_|sk-|AIza|AKIA|ghp_|gho_|xox[bpas]-)[a-zA-Z0-9_-]{10,}['"]/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 26: Secure Communications
+  // ════════════════════════════════════════════
+  {
+    id: 'INSECURE_HTTP_API',
+    category: 'Configuration',
+    description:
+      'API call using HTTP instead of HTTPS — data transmitted in plaintext, vulnerable to MITM attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Always use HTTPS for API calls. Replace http:// with https:// for all production endpoints.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bfetch\s*\(\s*['"`]http:\/\//.test(line) &&
+        !/\baxios\s*\.\s*(?:get|post|put|patch|delete)\s*\(\s*['"`]http:\/\//.test(line) &&
+        !/\bhttp:\/\/[a-zA-Z0-9]/.test(line)) return false;
+      // Exclude localhost, 127.0.0.1, and test URLs
+      if (/http:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(line)) return false;
+      // Must be a fetch/axios/got/request call or URL assignment
+      return /\b(?:fetch|axios|got|request|http\.get|http\.post|http\.request)\s*\(\s*['"`]http:\/\//.test(line) ||
+        /\b(?:url|endpoint|baseUrl|apiUrl|baseURL)\s*[:=]\s*['"`]http:\/\/(?!localhost|127\.0\.0\.1)/.test(line);
+    },
+  },
+  {
+    id: 'INSECURE_WEBSOCKET',
+    category: 'Configuration',
+    description:
+      'WebSocket connection using ws:// instead of wss:// — data transmitted in plaintext over unencrypted WebSocket.',
+    severity: 'high',
+    fix_suggestion:
+      'Use wss:// for WebSocket connections in production. ws:// should only be used for localhost development.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bws:\/\//.test(line)) return false;
+      // Exclude localhost and local IPs
+      if (/ws:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)/.test(line)) return false;
+      // Must be in a WebSocket constructor or URL assignment context
+      return /\bnew\s+WebSocket\s*\(\s*['"`]ws:\/\//.test(line) ||
+        /\b(?:url|endpoint|wsUrl|socketUrl)\s*[:=]\s*['"`]ws:\/\/(?!localhost|127\.0\.0\.1)/.test(line);
+    },
+  },
+  {
+    id: 'MIXED_CONTENT_SCRIPT',
+    category: 'Configuration',
+    description:
+      'Script loaded over HTTP in HTTPS context — mixed content allows MITM to inject malicious JavaScript.',
+    severity: 'high',
+    fix_suggestion:
+      'Load all scripts over HTTPS. Use protocol-relative URLs or HTTPS explicitly for all external resources.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect script src loading over HTTP
+      if (!/\bsrc\s*=\s*['"`]http:\/\//.test(line) && !/\.src\s*=\s*['"`]http:\/\//.test(line)) return false;
+      if (/http:\/\/(?:localhost|127\.0\.0\.1)/.test(line)) return false;
+      return /\b(?:script|iframe|link)\b/i.test(line) ||
+        /\.src\s*=\s*['"`]http:\/\//.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 27: Authorization Advanced
+  // ════════════════════════════════════════════
+  {
+    id: 'AUTH_ROLE_FROM_CLIENT',
+    category: 'Authorization',
+    description:
+      'Admin/role check using client-provided value (req.body.role) — attacker can set any role in request body.',
+    severity: 'critical',
+    fix_suggestion:
+      'Get user role from server-side session, JWT, or database lookup. Never trust role values from the request body or query parameters.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\breq\s*\.\s*body\s*\.\s*(?:role|isAdmin|permissions|accessLevel)\b/.test(line) &&
+        /(?:===?\s*['"]admin['"]|===?\s*['"]root['"]|===?\s*true\b|!==?\s*['"]user['"])/i.test(line);
+    },
+  },
+  {
+    id: 'MISSING_OWNERSHIP_CHECK',
+    category: 'Authorization',
+    description:
+      'Database UPDATE/DELETE by ID without ownership check (no user_id/owner_id in WHERE clause) — IDOR vulnerability.',
+    severity: 'high',
+    fix_suggestion:
+      'Always include user_id or owner_id from the authenticated session in WHERE clauses for UPDATE and DELETE operations.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect UPDATE/DELETE with WHERE id = but no user_id/owner_id
+      const hasUpdateDelete = /\b(?:UPDATE|DELETE)\b.*\bWHERE\b.*\bid\s*=/.test(line);
+      if (!hasUpdateDelete) return false;
+      const hasOwnerCheck = /\b(?:user_id|owner_id|created_by|author_id|userId|ownerId)\b/.test(line);
+      return !hasOwnerCheck;
+    },
+  },
+  {
+    id: 'AUTH_METHOD_OVERRIDE',
+    category: 'Authorization',
+    description:
+      'Method override enabled — attackers can bypass authorization by sending _method parameter to change HTTP method.',
+    severity: 'high',
+    fix_suggestion:
+      'Disable method override in production or restrict to safe methods. If needed, validate the override against the original auth check.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:methodOverride|method-override|_method)\b/.test(line) &&
+        /\b(?:use|require|import)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 28: AI/LLM Security v3
+  // ════════════════════════════════════════════
+  {
+    id: 'AI_OUTPUT_EVAL_V2',
+    category: 'AI/LLM Security',
+    description:
+      'LLM output passed to eval(), Function constructor, or vm.runInContext — enables arbitrary code execution from AI responses.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never execute LLM output as code. Use structured output with Zod validation, or a sandboxed interpreter for code execution.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect eval/Function/vm with LLM output variables
+      return /\b(?:eval|Function|vm\.run\w*)\s*\(\s*(?:aiResponse|llmOutput|completion|generated|modelOutput|chatResponse|aiResult)\b/.test(line);
+    },
+  },
+  {
+    id: 'AI_OUTPUT_SQL',
+    category: 'AI/LLM Security',
+    description:
+      'AI/LLM response inserted into SQL query — enables SQL injection via adversarial model outputs.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never insert AI/LLM output into SQL queries. Validate and sanitize model output, or use parameterized queries with AI-generated values.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      const hasSql = /\b(?:query|execute|raw)\s*\(/.test(line) || /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i.test(line);
+      const hasAiVar = /\b(?:aiResponse|llmOutput|completion|generated|modelOutput|chatResponse|aiResult|gptResponse)\b/.test(line);
+      return hasSql && hasAiVar && (/\+\s*(?:aiResponse|llmOutput|completion|generated|modelOutput|chatResponse)/.test(line) ||
+        /\$\{(?:aiResponse|llmOutput|completion|generated|modelOutput|chatResponse)/.test(line));
+    },
+  },
+  {
+    id: 'AI_OUTPUT_HTML_UNSANITIZED',
+    category: 'AI/LLM Security',
+    description:
+      'AI/LLM model output rendered as HTML without sanitization — enables XSS via adversarial model responses.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize AI output with DOMPurify before rendering as HTML. Or display as plain text using textContent instead of innerHTML.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.innerHTML\s*=/.test(line) && !/dangerouslySetInnerHTML/.test(line)) return false;
+      return /\b(?:aiResponse|llmOutput|completion|generated|modelOutput|chatResponse|aiResult|gptResponse)\b/.test(line) &&
+        !/\b(?:sanitize|DOMPurify|purify|escape)\b/i.test(line);
+    },
+  },
+  {
+    id: 'AI_TOOL_SCHEMA_USER_INPUT',
+    category: 'AI/LLM Security',
+    description:
+      'User input embedded in AI tool/function calling schema — enables tool-use injection to manipulate AI tool calls.',
+    severity: 'high',
+    fix_suggestion:
+      'Never embed user input in tool/function schemas. Validate and sanitize all inputs before including in AI function definitions.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect user input in tool definitions
+      const hasToolSchema = /\b(?:tools|functions|function_call)\s*[:=]/.test(line);
+      const hasUserInput = /\b(?:req\.body|userInput|user_input|req\.query)\b/.test(line);
+      if (!hasToolSchema && !hasUserInput) return false;
+      return hasToolSchema && hasUserInput;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 29: Payment & Financial
+  // ════════════════════════════════════════════
+  {
+    id: 'STRIPE_AMOUNT_FROM_CLIENT',
+    category: 'Payment Security',
+    description:
+      'Stripe charge amount taken directly from request body — attackers can modify the amount to pay less.',
+    severity: 'critical',
+    fix_suggestion:
+      'Always calculate payment amounts server-side from your product/price database. Never trust amounts from the client.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bamount\s*:/.test(line)) return false;
+      return /\bamount\s*:\s*req\s*\.\s*body\s*\.\s*(?:amount|price|total|cost)\b/.test(line) &&
+        /\bstripe\b/i.test(line);
+    },
+  },
+  {
+    id: 'NEGATIVE_QUANTITY_NO_CHECK',
+    category: 'Payment Security',
+    description:
+      'Quantity from user input used in payment calculation without positivity check — negative values can reverse charges.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate that quantity is a positive integer before using in price calculations. Use Math.max(1, quantity) or explicit validation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:quantity|qty)\b/.test(line)) return false;
+      if (!/\breq\s*\.\s*body\s*\.\s*(?:quantity|qty)\b/.test(line)) return false;
+      return /\b(?:price|amount|total|cost)\b/.test(line) && /[*]/.test(line);
+    },
+  },
+  {
+    id: 'STRIPE_PRICE_ID_FROM_CLIENT',
+    category: 'Payment Security',
+    description:
+      'Stripe price ID taken from client request without server validation — attackers can substitute a cheaper price ID.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate price IDs against your server-side product catalog. Never pass client-provided price IDs directly to Stripe.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bprice\s*:\s*req\s*\.\s*body\s*\.\s*(?:priceId|price_id|price)\b/.test(line)) return false;
+      return /\bstripe\b/i.test(line) || /\bcheckout\b/i.test(line) || /\bsession\b/i.test(line);
+    },
+  },
+  {
+    id: 'WEBHOOK_NO_STRIPE_SIGNATURE',
+    category: 'Payment Security',
+    description:
+      'Stripe webhook handler without signature verification — attackers can forge webhook events to manipulate payment state.',
+    severity: 'critical',
+    fix_suggestion:
+      'Always verify Stripe webhook signatures: stripe.webhooks.constructEvent(body, sig, webhookSecret). Never process unverified events.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect webhook handler processing Stripe events without verification
+      if (!/\b(?:checkout\.session\.completed|payment_intent\.succeeded|invoice\.paid|customer\.subscription)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return !/\b(?:constructEvent|verifyWebhookSignature|stripe-signature|webhook_secret)\b/i.test(window);
+    },
+  },
 ];
 
 // ── File Discovery ──

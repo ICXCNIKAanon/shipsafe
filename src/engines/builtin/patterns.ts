@@ -8559,9 +8559,13 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
       if (!/\b(?:app|router)\s*\.\s*(?:use|get|post|put|delete)\s*\(\s*['"`]\/admin\b/.test(line)) return false;
-      return !/\b(?:auth|authenticate|authorize|isAdmin|requireAdmin|adminAuth|requireRole|protect|guard)\b/i.test(line);
+      if (/\b(?:auth|authenticate|authorize|isAdmin|requireAdmin|adminAuth|requireRole|protect|guard)\b/i.test(line)) return false;
+      // Check if router-level auth middleware is applied earlier in the file
+      const lineIdx = ctx.lineNumber - 1;
+      const before = ctx.allLines.slice(Math.max(0, lineIdx - 15), lineIdx).join('\n');
+      return !/\b(?:router|app)\s*\.\s*use\s*\(\s*(?:auth|authenticate|authorize|isAdmin|requireAdmin|protect|guard)\b/i.test(before);
     },
   },
   {
@@ -9915,6 +9919,870 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line) => {
       return /\bjsonify\s*\(\s*\[/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 31: Express/Fastify/Hono Framework Patterns
+  // ════════════════════════════════════════════
+  {
+    id: 'BODYPARSER_EXTENDED_PROTO_POLLUTION',
+    category: 'Prototype Pollution',
+    description:
+      'Express body-parser urlencoded with extended:true allows deeply nested objects — enables prototype pollution via qs library.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use extended:false or add depth/parameterLimit options: urlencoded({ extended: true, parameterLimit: 100, depth: 3 }).',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\burlencoded\s*\(/.test(line)) return false;
+      if (!/\bextended\s*:\s*true\b/.test(line)) return false;
+      // Flag if no depth or parameterLimit is set
+      return !/\b(?:depth|parameterLimit)\b/.test(line);
+    },
+  },
+  {
+    id: 'FASTIFY_NO_SCHEMA_VALIDATION',
+    category: 'Input Validation',
+    description:
+      'Fastify route handler without JSON schema validation — bypasses Fastify\'s built-in input validation.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add schema property to route options: { schema: { body: { type: "object", properties: {...}, required: [...] } } }.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bfastify\s*\.\s*(?:post|put|patch)\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return !/\bschema\b/.test(window);
+    },
+  },
+  {
+    id: 'HONO_CORS_WILDCARD',
+    category: 'CORS',
+    description:
+      'Hono CORS middleware with wildcard origin — allows any website to make authenticated requests.',
+    severity: 'high',
+    fix_suggestion:
+      'Specify allowed origins explicitly: cors({ origin: ["https://app.example.com"] }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bcors\s*\(/.test(line)) return false;
+      return /\bcors\s*\(\s*\)/.test(line) || /origin\s*:\s*['"`]\*['"`]/.test(line);
+    },
+  },
+  {
+    id: 'EXPRESS_STATIC_PROJECT_ROOT',
+    category: 'Server Misconfiguration',
+    description:
+      'Express static middleware serving from project root or current directory — exposes .env, package.json, source code.',
+    severity: 'critical',
+    fix_suggestion:
+      'Serve only a dedicated public/ or static/ directory: app.use(express.static("public")).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bexpress\.static\b/.test(line)) return false;
+      // Serving . or ./ or process.cwd()
+      return /express\.static\s*\(\s*['"`]\.['"`\/]?\s*\)/.test(line) ||
+        /express\.static\s*\(\s*process\.cwd\s*\(\s*\)\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'HELMET_MISSING_CSP',
+    category: 'Security Headers',
+    description:
+      'Helmet configured with contentSecurityPolicy explicitly disabled — leaves the app vulnerable to XSS.',
+    severity: 'high',
+    fix_suggestion:
+      'Enable CSP: helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["\'self\'"] } } }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bhelmet\s*\(/.test(line) && /contentSecurityPolicy\s*:\s*false/.test(line);
+    },
+  },
+  {
+    id: 'HELMET_MISSING_HSTS',
+    category: 'Security Headers',
+    description:
+      'Helmet configured with HSTS explicitly disabled — allows downgrade attacks from HTTPS to HTTP.',
+    severity: 'high',
+    fix_suggestion:
+      'Enable HSTS: helmet({ hsts: { maxAge: 31536000, includeSubDomains: true } }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bhelmet\s*\(/.test(line) && /\bhsts\s*:\s*false\b/.test(line);
+    },
+  },
+  {
+    id: 'HELMET_MISSING_FRAMEGUARD',
+    category: 'Security Headers',
+    description:
+      'Helmet configured with frameguard explicitly disabled — allows clickjacking attacks via iframes.',
+    severity: 'medium',
+    fix_suggestion:
+      'Enable frameguard: helmet({ frameguard: { action: "deny" } }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bhelmet\s*\(/.test(line) && /\bframeguard\s*:\s*false\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 32: Database Connection & Query Patterns
+  // ════════════════════════════════════════════
+  {
+    id: 'DB_POOL_NO_MAX_CONNECTIONS',
+    category: 'Denial of Service',
+    description:
+      'Database connection pool created without max connections limit — can exhaust database connections and cause DoS.',
+    severity: 'medium',
+    fix_suggestion:
+      'Set max connections: new Pool({ max: 20 }) or createPool({ connectionLimit: 20 }).',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bnew\s+Pool\s*\(/.test(line) && !/\bcreatePool\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return !/\b(?:max|connectionLimit|pool_size)\s*:/.test(window);
+    },
+  },
+  {
+    id: 'DB_CONNECTION_STRING_LOGGED',
+    category: 'Secrets',
+    description:
+      'Database connection string logged or printed — exposes credentials in log files.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never log connection strings. Log only the host/database name without credentials.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx', '.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:console\.log|logger\.\w+|print|logging\.\w+)\s*\(/.test(line)) return false;
+      return /\b(?:connectionString|connection_string|databaseUrl|database_url|DATABASE_URL|DB_URL|MONGO_URI|MONGODB_URI|POSTGRES_URL)\b/.test(line) &&
+        !/\b(?:process\.env|os\.environ|redact|mask|censor)\b/.test(line);
+    },
+  },
+  {
+    id: 'SQL_TIMING_ORACLE',
+    category: 'Information Disclosure',
+    description:
+      'Different error messages for record exists vs not-exists — allows attackers to enumerate valid records via timing oracle.',
+    severity: 'medium',
+    fix_suggestion:
+      'Return the same generic error message regardless of whether a record exists or not.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:not\s+found|does\s+not\s+exist|no\s+such\s+user|user\s+not\s+found|email\s+not\s+found|account\s+not\s+found)\b/i.test(line)) return false;
+      if (!/\b(?:res\.status|throw|return)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return /\b(?:invalid\s+password|wrong\s+password|incorrect\s+password|password\s+mismatch)\b/i.test(window);
+    },
+  },
+  {
+    id: 'BATCH_OPS_NO_TRANSACTION',
+    category: 'Data Integrity',
+    description:
+      'Multiple sequential database write operations without a transaction — partial failures leave data inconsistent.',
+    severity: 'medium',
+    fix_suggestion:
+      'Wrap related writes in a transaction: await db.transaction(async (tx) => { ... }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bawait\s+\w+\.\s*(?:insert|update|delete|create|destroy|save)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      // Look for another write within 5 lines
+      const window = ctx.allLines.slice(lineIdx + 1, Math.min(ctx.allLines.length, lineIdx + 6)).join('\n');
+      if (!/\bawait\s+\w+\.\s*(?:insert|update|delete|create|destroy|save)\b/.test(window)) return false;
+      // Check if we're already in a transaction
+      const before = ctx.allLines.slice(Math.max(0, lineIdx - 10), lineIdx).join('\n');
+      return !/\b(?:transaction|beginTransaction|startTransaction|BEGIN)\b/i.test(before);
+    },
+  },
+  {
+    id: 'RAW_SQL_IN_PRODUCTION_MIGRATION',
+    category: 'SQL Injection',
+    description:
+      'Raw SQL string executed conditionally at runtime (not just in migration) — may be vulnerable to injection.',
+    severity: 'high',
+    fix_suggestion:
+      'Use parameterized queries for any SQL that runs at request time. Raw SQL should only exist in migration files.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:execute|query|exec)\s*\(\s*['"`](?:ALTER|DROP|CREATE|TRUNCATE)\b/i.test(line)) return false;
+      // If file is a migration, skip
+      return !/migration/i.test(ctx.filePath) && !/seed/i.test(ctx.filePath);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 33: File Upload Comprehensive
+  // ════════════════════════════════════════════
+  {
+    id: 'FILE_UPLOAD_NO_SIZE_LIMIT',
+    category: 'Denial of Service',
+    description:
+      'File upload handler without size limit — allows uploading arbitrarily large files causing DoS.',
+    severity: 'high',
+    fix_suggestion:
+      'Set file size limit: multer({ limits: { fileSize: 10 * 1024 * 1024 } }) or busboy({ limits: { fileSize: ... } }).',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:multer|busboy|formidable)\s*\(/.test(line)) return false;
+      if (/\blimits\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return !/\blimits\b/.test(window) && !/\bfileSize\b/.test(window) && !/\bmaxFileSize\b/.test(window);
+    },
+  },
+  {
+    id: 'UPLOAD_IN_WEBROOT',
+    category: 'Server Misconfiguration',
+    description:
+      'File uploads stored in a web-accessible directory (public/, static/, uploads/ under webroot) — uploaded files can be executed.',
+    severity: 'critical',
+    fix_suggestion:
+      'Store uploads outside the webroot. Serve them through a route with access control, not via static file serving.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:destination|dest|uploadDir|upload_dir)\b/.test(line)) return false;
+      return /\b(?:destination|dest|uploadDir|upload_dir)\s*[:=]\s*['"`](?:\.\/)?(?:public|static|www|htdocs|webroot)\//.test(line);
+    },
+  },
+  {
+    id: 'UPLOAD_ORIGINAL_FILENAME',
+    category: 'Path Traversal',
+    description:
+      'Uploaded file stored using original filename without sanitization — enables path traversal and overwriting server files.',
+    severity: 'high',
+    fix_suggestion:
+      'Generate a random filename: `${crypto.randomUUID()}${path.extname(file.originalname)}` instead of using the original.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:originalname|originalFilename|original_filename|filename)\b/.test(line)) return false;
+      return /\b(?:writeFile|rename|mv|copyFile|createWriteStream)\s*\([^)]*\b(?:originalname|originalFilename|original_filename)\b/.test(line) ||
+        /\bpath\.join\s*\([^)]*\b(?:originalname|originalFilename|original_filename)\b/.test(line);
+    },
+  },
+  {
+    id: 'UPLOAD_MIME_ONLY_CHECK',
+    category: 'File Upload',
+    description:
+      'File type validated by MIME type only (no magic byte check) — MIME types are client-controlled and easily spoofed.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate file type using magic bytes (file-type library) in addition to MIME type and extension checks.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:mimetype|mimeType|mime_type|content-type|contentType)\b/.test(line)) return false;
+      if (!/\b(?:includes|===|==|startsWith|match)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return !/\b(?:magic|fileType|file-type|fromBuffer|fromFile|signature)\b/i.test(window);
+    },
+  },
+  {
+    id: 'UPLOAD_EXECUTABLE_EXTENSION',
+    category: 'File Upload',
+    description:
+      'File upload allows executable extensions (.exe, .sh, .bat, .cmd, .ps1) — enables remote code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Maintain an allowlist of permitted extensions (e.g., .jpg, .png, .pdf). Never rely on a denylist.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detects an array or set containing executable extensions
+      return /['"`]\.(?:exe|sh|bat|cmd|ps1|msi|dll|com|scr|vbs|wsf)['"`]/.test(line) &&
+        /(?:\[|new\s+Set|allow|accept|extension|ext|type)/i.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 34: Session & Cookie Deep Dive
+  // ════════════════════════════════════════════
+  {
+    id: 'COOKIE_MISSING_SAMESITE',
+    category: 'Cookie Security',
+    description:
+      'Cookie set without SameSite attribute — vulnerable to cross-site request forgery attacks.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add sameSite: "strict" or sameSite: "lax" to cookie options.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bres\.cookie\s*\(/.test(line)) return false;
+      if (/\bsameSite\b/i.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return !/\bsameSite\b/i.test(window);
+    },
+  },
+  {
+    id: 'SESSION_MEMORY_STORE',
+    category: 'Session Security',
+    description:
+      'Session stored in memory (MemoryStore) — leaks memory, does not scale across processes, loses sessions on restart.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use a production session store: connect-redis, connect-mongo, or connect-pg-simple.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bnew\s+(?:session\.)?MemoryStore\s*\(/.test(line) ||
+        /\bstore\s*:\s*new\s+MemoryStore\b/.test(line);
+    },
+  },
+  {
+    id: 'SESSION_TIMEOUT_EXCESSIVE',
+    category: 'Session Security',
+    description:
+      'Session timeout set to more than 24 hours — increases window for session hijacking attacks.',
+    severity: 'medium',
+    fix_suggestion:
+      'Set session timeout to 1-4 hours for standard apps, shorter for sensitive operations.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match maxAge in milliseconds > 24 hours (86400000)
+      const match = line.match(/\bmaxAge\s*:\s*(\d[\d_]*)/);
+      if (match) {
+        const val = parseInt(match[1].replace(/_/g, ''), 10);
+        return val > 86_400_000;
+      }
+      // Match cookie.maxAge or expiresIn > 24h patterns
+      const hoursMatch = line.match(/\b(?:maxAge|expiresIn|ttl)\s*:\s*['"`](\d+)\s*(?:d|days?)['"`]/);
+      if (hoursMatch) {
+        return parseInt(hoursMatch[1], 10) > 1;
+      }
+      return false;
+    },
+  },
+  {
+    id: 'SESSION_NO_INVALIDATE_ON_PASSWORD_CHANGE',
+    category: 'Session Security',
+    description:
+      'Password change handler does not invalidate existing sessions — old sessions remain valid after password reset.',
+    severity: 'high',
+    fix_suggestion:
+      'Invalidate all sessions after password change: req.session.destroy() or revoke all tokens for the user.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:changePassword|change_password|updatePassword|update_password|resetPassword|reset_password)\b/.test(line)) return false;
+      if (!/\b(?:function|async|const|handler|=>\s*{)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 20)).join('\n');
+      return !/\b(?:session\.destroy|invalidate|revokeAll|deleteAll|clearSessions|logout|signOut)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 35: Input Validation Variants
+  // ════════════════════════════════════════════
+  {
+    id: 'EMAIL_VALIDATION_REGEX_ONLY',
+    category: 'Input Validation',
+    description:
+      'Email validated with regex only — custom email regexes are notoriously incomplete. Use a validation library.',
+    severity: 'low',
+    fix_suggestion:
+      'Use a validation library (Zod z.string().email(), validator.isEmail(), Joi.string().email()).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bemail\b/i.test(line)) return false;
+      return /\b(?:test|match|exec)\s*\([^)]*@[^)]*\)/.test(line) ||
+        /\/.*@.*\/\s*\.\s*(?:test|exec|match)\b/.test(line);
+    },
+  },
+  {
+    id: 'PHONE_NUMBER_IN_SQL',
+    category: 'SQL Injection',
+    description:
+      'Phone number field used directly in SQL query without validation — may contain injection payloads.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate phone numbers with a library (libphonenumber), then use parameterized queries.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:phone|mobile|cell|telephone|tel)\b/i.test(line)) return false;
+      return /\b(?:query|execute|raw)\s*\(.*\$\{.*\b(?:phone|mobile|cell|telephone|tel)\b/i.test(line) ||
+        /\b(?:query|execute|raw)\s*\(.*\+\s*\w*(?:phone|mobile|cell|telephone|tel)\b/i.test(line);
+    },
+  },
+  {
+    id: 'ZIP_CODE_NO_LENGTH_LIMIT',
+    category: 'Input Validation',
+    description:
+      'Zip code or postal code field with no length limit — can be used to inject oversized payloads.',
+    severity: 'low',
+    fix_suggestion:
+      'Validate zip codes with strict length limits (5-10 chars) and allowed character patterns.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:zip_?code|postal_?code|zipCode|postalCode)\b/i.test(line)) return false;
+      // DB field or input without maxLength or validation
+      return /\b(?:type|Type)\s*:\s*['"`](?:string|text|varchar)['"`]/.test(line) &&
+        !/\b(?:maxLength|max_length|length|validate|max)\b/i.test(line);
+    },
+  },
+  {
+    id: 'HTML_IN_USERNAME',
+    category: 'XSS',
+    description:
+      'Username field rendered without HTML escaping — allows stored XSS attacks through user display names.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize usernames on input (strip HTML) or always escape when rendering.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:innerHTML|dangerouslySetInnerHTML)\b/.test(line)) return false;
+      return /\b(?:username|displayName|display_name|userName|user_name|nickname)\b/i.test(line);
+    },
+  },
+  {
+    id: 'URL_NO_PROTOCOL_VALIDATION',
+    category: 'SSRF',
+    description:
+      'URL input accepted without protocol validation — allows javascript:, file:, or data: protocol URLs.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate URLs start with https:// or http://. Reject javascript:, data:, file:, and ftp: protocols.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bnew\s+URL\s*\(\s*(?:req\.|user|input|data|body|params)/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return !/\b(?:protocol|startsWith\s*\(\s*['"`]https?|allowedProtocol|validateUrl|isValidUrl)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 36: Error Handling Comprehensive
+  // ════════════════════════════════════════════
+  {
+    id: 'GLOBAL_ERROR_HANDLER_FULL_ERROR',
+    category: 'Information Disclosure',
+    description:
+      'Global error handler sends full error details to client — leaks stack traces, file paths, and internal state.',
+    severity: 'high',
+    fix_suggestion:
+      'Return generic error messages to clients. Log full error details server-side only.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:err|error|e)\s*,\s*(?:req|request)\s*,\s*(?:res|response)\s*,\s*(?:next)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return /\bres\s*\.\s*(?:json|send)\s*\(\s*(?:err|error|e)\s*\)/.test(window) ||
+        /\bres\s*\.\s*(?:json|send)\s*\(\s*\{\s*(?:error|message)\s*:\s*(?:err|error|e)\.(?:message|stack)\b/.test(window);
+    },
+  },
+  {
+    id: 'EXPRESS_ASYNC_NO_NEXT',
+    category: 'Error Handling',
+    description:
+      'Async Express route handler without next(err) call — unhandled rejections crash the process or hang the request.',
+    severity: 'medium',
+    fix_suggestion:
+      'Wrap async handlers: app.get("/path", asyncHandler(async (req, res) => { ... })) or call next(err) in catch.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\s*\.\s*(?:get|post|put|patch|delete)\s*\(/.test(line)) return false;
+      if (!/\basync\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 15)).join('\n');
+      return !/\b(?:next\s*\(|asyncHandler|catchAsync|expressAsyncHandler|tryCatch|wrapAsync)\b/.test(window) &&
+        !/\b(?:try\s*\{)\b/.test(window);
+    },
+  },
+  {
+    id: 'AUTH_ERROR_TIMING_ORACLE',
+    category: 'Authentication',
+    description:
+      'Try-catch returns different error messages for authentication steps — allows attackers to enumerate valid credentials.',
+    severity: 'medium',
+    fix_suggestion:
+      'Return the same "Invalid credentials" message for both invalid username and invalid password.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:Invalid\s+(?:email|username|user)|User\s+not\s+found|No\s+account)\b/i.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return /\b(?:Invalid\s+password|Wrong\s+password|Incorrect\s+password|Password\s+(?:does\s+not\s+match|mismatch))\b/i.test(window);
+    },
+  },
+  {
+    id: 'UNCAUGHT_EXCEPTION_CONTINUE',
+    category: 'Reliability',
+    description:
+      'process.on("uncaughtException") handler that continues running — the process is in an undefined state and must exit.',
+    severity: 'high',
+    fix_suggestion:
+      'Always call process.exit(1) in uncaughtException handlers after logging. Use a process manager to restart.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bprocess\s*\.\s*on\s*\(\s*['"`]uncaughtException['"`]/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return !/\bprocess\.exit\b/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 37: Logging & Monitoring Security
+  // ════════════════════════════════════════════
+  {
+    id: 'LOG_FULL_REQUEST_BODY',
+    category: 'Information Disclosure',
+    description:
+      'Logging full request body — may contain passwords, tokens, credit cards, or PII.',
+    severity: 'high',
+    fix_suggestion:
+      'Log only specific safe fields. Use a sanitizer that strips sensitive fields before logging.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:console\.log|logger\.\w+|log\.\w+|winston\.\w+|pino\.\w+)\s*\(/.test(line)) return false;
+      return /\breq\.body\b/.test(line) && !/\b(?:redact|sanitize|scrub|mask|strip|omit)\b/i.test(line);
+    },
+  },
+  {
+    id: 'MORGAN_COMBINED_NO_PROXY',
+    category: 'Privacy',
+    description:
+      'Morgan logging with "combined" format logs client IP addresses — may violate GDPR without proper proxy setup.',
+    severity: 'low',
+    fix_suggestion:
+      'Use a custom format that excludes IPs, or ensure trust proxy is configured and IPs are anonymized.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bmorgan\s*\(/.test(line)) return false;
+      return /\bmorgan\s*\(\s*['"`]combined['"`]/.test(line);
+    },
+  },
+  {
+    id: 'SENTRY_FULL_USER_DATA',
+    category: 'Privacy',
+    description:
+      'Sentry configured to send full user objects — may leak email, IP, and PII to third-party service.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use Sentry beforeSend to scrub user data: beforeSend(event) { delete event.user.email; return event; }.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bSentry\s*\.\s*(?:setUser|configureScope)\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return /\b(?:email|ip_address|ip|fullName|full_name|phone)\b/.test(window) &&
+        !/\b(?:beforeSend|scrub|redact|sanitize)\b/i.test(window);
+    },
+  },
+  {
+    id: 'LOG_INJECTION_CORRELATION_ID',
+    category: 'Log Injection',
+    description:
+      'Correlation or trace ID taken from user input without sanitization — enables log injection and log forging.',
+    severity: 'medium',
+    fix_suggestion:
+      'Generate correlation IDs server-side with crypto.randomUUID(). Never use client-provided values as log identifiers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:correlationId|correlation_id|traceId|trace_id|requestId|request_id)\s*[=:]\s*(?:req\s*\.\s*(?:headers|query|body|params))\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 38: Rate Limiting & DoS Prevention
+  // ════════════════════════════════════════════
+  {
+    id: 'RATE_LIMIT_MEMORY_ONLY',
+    category: 'Rate Limiting',
+    description:
+      'Rate limiter using in-memory store — easily bypassed by restarting the server, and doesn\'t work across multiple instances.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use a Redis-backed rate limit store: rateLimit({ store: new RedisStore({ ... }) }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\brateLimit\s*\(\s*\{/.test(line)) return false;
+      // Only flag when it's being used in an app.use() or assigned to middleware used on a route
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      if (/\bstore\b/.test(window)) return false;
+      // Must also have app.use in same line or be directly used as middleware in route
+      return /\bapp\s*\.\s*(?:use|get|post|put|delete|patch)\s*\([^)]*rateLimit\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'RATE_LIMIT_IP_NO_TRUST_PROXY',
+    category: 'Rate Limiting',
+    description:
+      'Rate limiting by IP behind a proxy without trust proxy — all requests appear from the proxy IP, making rate limiting useless.',
+    severity: 'medium',
+    fix_suggestion:
+      'Configure trust proxy: app.set("trust proxy", 1) when behind a reverse proxy or load balancer.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Only flag when rateLimit is directly used in app.use with explicit keyGenerator referencing req.ip
+      if (!/\brateLimit\s*\(/.test(line)) return false;
+      if (!/\bkeyGenerator\b/.test(line)) return false;
+      if (!/\breq\.ip\b/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/\btrust\s*proxy\b/.test(allContent);
+    },
+  },
+  {
+    id: 'NO_RATE_LIMIT_UPLOAD',
+    category: 'Denial of Service',
+    description:
+      'File upload endpoint without rate limiting — allows an attacker to flood the server with uploads.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add rate limiting to upload endpoints: app.post("/upload", uploadLimiter, upload.single("file"), handler).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:app|router)\s*\.\s*(?:post|put)\s*\(/.test(line)) return false;
+      if (!/\b(?:upload|multer|busboy)\b/.test(line)) return false;
+      return !/(?:rateLimit|[Ll]imiter|throttle|slowDown)\b/.test(line);
+    },
+  },
+  {
+    id: 'RECURSIVE_NO_DEPTH_LIMIT',
+    category: 'Denial of Service',
+    description:
+      'Recursive function processing user input without depth limit — can cause stack overflow via deeply nested input.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add a depth parameter with a maximum: function process(data, depth = 0) { if (depth > 100) throw new Error("Too deep"); ... }.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Find recursive function (function that calls itself)
+      const funcMatch = line.match(/\bfunction\s+(\w+)\s*\(/);
+      if (!funcMatch) return false;
+      const funcName = funcMatch[1];
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx + 1, Math.min(ctx.allLines.length, lineIdx + 20)).join('\n');
+      if (!new RegExp(`\\b${funcName}\\s*\\(`).test(window)) return false;
+      // Check for depth/maxDepth parameter
+      return !/\b(?:depth|maxDepth|max_depth|level|maxLevel)\b/.test(line) &&
+        !/\b(?:depth|maxDepth|max_depth|level|maxLevel)\b/.test(window);
+    },
+  },
+  {
+    id: 'REGEX_NO_TIMEOUT',
+    category: 'Denial of Service',
+    description:
+      'Regular expression executed on user input without timeout — ReDoS-vulnerable patterns can hang the event loop.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use RE2 library for user-facing regex, or set a timeout with node --experimental-vm-modules and vm.runInNewContext.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bnew\s+RegExp\s*\(/.test(line)) return false;
+      return /\bnew\s+RegExp\s*\(\s*(?:req\.|user|input|data|body|params|query)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 39: Encryption & Key Management
+  // ════════════════════════════════════════════
+  {
+    id: 'ENCRYPTION_KEY_NO_KDF',
+    category: 'Cryptography',
+    description:
+      'Encryption key derived from password without a key derivation function — weak and easily brute-forced.',
+    severity: 'high',
+    fix_suggestion:
+      'Use crypto.scryptSync(password, salt, 32) or PBKDF2 to derive keys from passwords.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bcreateHash\s*\(/.test(line)) return false;
+      return /\bcreateHash\s*\([^)]*\)\s*\.\s*update\s*\(\s*(?:password|passwd|pass|pwd|secret)\b/i.test(line) &&
+        /\.\s*digest\b/.test(line);
+    },
+  },
+  {
+    id: 'IV_REUSE',
+    category: 'Cryptography',
+    description:
+      'Initialization vector (IV) is static or reused across encryptions — breaks confidentiality of AES-CBC/CTR.',
+    severity: 'critical',
+    fix_suggestion:
+      'Generate a random IV for each encryption: crypto.randomBytes(16). Store the IV alongside the ciphertext.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\biv\b/i.test(line)) return false;
+      return /\b(?:const|let|var)\s+iv\s*=\s*(?:Buffer\.from\s*\(\s*['"`]|['"`][0-9a-fA-F]+['"`]|Buffer\.alloc\s*\(\s*16\s*(?:,\s*0)?\s*\))/.test(line);
+    },
+  },
+  {
+    id: 'CRYPTO_ECB_MODE_USE',
+    category: 'Cryptography',
+    description:
+      'ECB mode used for encryption — identical plaintext blocks produce identical ciphertext, leaking patterns.',
+    severity: 'high',
+    fix_suggestion:
+      'Use AES-GCM (authenticated encryption) or AES-CBC with HMAC instead of ECB mode.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:aes|des|blowfish|camellia)[-_]?\d*[-_]?ecb\b/i.test(line) &&
+        /\b(?:createCipher|createDecipher|algorithm|cipher)\b/.test(line);
+    },
+  },
+  {
+    id: 'KEY_IN_SAME_DB',
+    category: 'Key Management',
+    description:
+      'Encryption key stored in the same database as encrypted data — if the database is breached, the encryption is useless.',
+    severity: 'high',
+    fix_suggestion:
+      'Store encryption keys in a separate key management service (AWS KMS, HashiCorp Vault, Azure Key Vault).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:encryption_?[Kk]ey|cipher_?[Kk]ey|master_?[Kk]ey)\b/.test(line)) return false;
+      // Check if we're in a schema/model context (look at surrounding lines)
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return /\b(?:Schema|schema|model|Model|define|pgTable|createTable|Column|column|DataTypes|varchar|String)\b/.test(window);
+    },
+  },
+  {
+    id: 'DEPRECATED_CREATE_CIPHER',
+    category: 'Cryptography',
+    description:
+      'crypto.createCipher() used (deprecated) — derives key from password with MD5 and no IV, extremely weak.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use crypto.createCipheriv() with a properly derived key (scrypt/PBKDF2) and random IV.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bcrypto\s*\.\s*createCipher\s*\(/.test(line) && !/\bcreateCipheriv\b/.test(line);
     },
   },
 ];

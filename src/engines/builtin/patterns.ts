@@ -1978,6 +1978,514 @@ const RULES: PatternRule[] = [
       return /\bos\s*\.\s*popen\s*\(/.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Next.js / React Specific
+  // ════════════════════════════════════════════
+  {
+    id: 'NEXT_SENSITIVE_PROPS',
+    category: 'Sensitive Data Exposure',
+    description:
+      'getServerSideProps or getStaticProps returns sensitive data (password, token, secret) in props — this data is serialized to the client.',
+    severity: 'high',
+    fix_suggestion:
+      'Never return sensitive fields (passwords, tokens, secrets) in page props. Strip sensitive data before returning props.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Check if we're in a getServerSideProps/getStaticProps function
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      if (!/\b(?:getServerSideProps|getStaticProps)\b/.test(window)) return false;
+      // Check if props contain sensitive field names
+      if (!/\bprops\s*:/.test(line) && !/\bprops\s*:/.test(window)) return false;
+      const propsWindow = ctx.allLines
+        .slice(Math.max(0, lineIdx - 2), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\b(?:password|secret|token|apiKey|api_key|privateKey|private_key|ssn|creditCard|credit_card)\s*[:=]/i.test(propsWindow) &&
+        /\bprops\s*:/.test(propsWindow);
+    },
+  },
+  {
+    id: 'NEXT_API_NO_AUTH',
+    category: 'Authentication Issues',
+    description:
+      'Next.js API route handler (export default function handler) without apparent authentication check — endpoint may be publicly accessible.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add authentication checks (getSession, getServerSession, auth middleware) at the beginning of API route handlers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Match export default function handler pattern
+      if (!/\bexport\s+default\s+(?:async\s+)?function\s+handler\b/.test(line)) return false;
+      // Check entire file for auth checks
+      return !/\b(?:auth|getSession|getServerSession|requireAuth|isAuthenticated|protect|guard|verify|middleware|getToken|withAuth|checkAuth|session)\b/i.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'NEXT_REVALIDATE_USER_INPUT',
+    category: 'Cache Poisoning',
+    description:
+      'revalidateTag() or revalidatePath() called with user-supplied input — may allow cache manipulation attacks.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate revalidation tags/paths against an allowlist. Never pass raw user input to revalidateTag or revalidatePath.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:revalidateTag|revalidatePath)\s*\(\s*[a-zA-Z_$]/.test(line)) return false;
+      // Exclude calls with string literals
+      if (/\b(?:revalidateTag|revalidatePath)\s*\(\s*['"]/.test(line)) return false;
+      // Check if the variable likely comes from user input
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 10), lineIdx + 1)
+        .join(' ');
+      return /\breq\b|\.json\(\)|\.body\b|\.query\b|\.params\b|\.searchParams\b/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // GraphQL Security
+  // ════════════════════════════════════════════
+  {
+    id: 'GRAPHQL_INTROSPECTION_ENABLED',
+    category: 'Insecure Configuration',
+    description:
+      'GraphQL introspection is explicitly enabled — in production this exposes the full API schema to attackers.',
+    severity: 'medium',
+    fix_suggestion:
+      'Disable introspection in production: new ApolloServer({ introspection: process.env.NODE_ENV !== "production" }).',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bintrospection\s*:\s*true\b/.test(line);
+    },
+  },
+  {
+    id: 'GRAPHQL_NO_DEPTH_LIMIT',
+    category: 'Insecure Configuration',
+    description:
+      'GraphQL server created without query depth limiting — vulnerable to resource exhaustion via deeply nested queries.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add a query depth limit plugin: new ApolloServer({ plugins: [depthLimit(10)] }). Install graphql-depth-limit or @graphql-tools/utils.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Only trigger on ApolloServer/YogaServer/GraphQLServer creation
+      if (!/\bnew\s+(?:ApolloServer|YogaServer|GraphQLServer)\s*\(/.test(line)) return false;
+      // Check the whole file for depth limit usage
+      return !/\b(?:depthLimit|depth[_-]?limit|maxDepth|max[_-]?depth|queryDepth|query[_-]?depth)\b/i.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'GRAPHQL_MUTATION_NO_AUTH',
+    category: 'Authentication Issues',
+    description:
+      'GraphQL mutation resolver accesses the database without an apparent authentication check — mutations should verify the caller\'s identity.',
+    severity: 'high',
+    fix_suggestion:
+      'Add authentication checks in mutation resolvers. Verify the user is authenticated via context (e.g., context.user, context.auth) before performing database operations.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Look for Mutation resolver definitions
+      if (!/\bMutation\s*:\s*\{/.test(line)) return false;
+      // Check a window for auth checks in the mutation block
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 20))
+        .join(' ');
+      // If there's DB access without auth
+      const hasDbAccess = /\b(?:db|prisma|knex|sequelize|mongoose|pool|client)\s*\.\s*(?:query|find|create|update|delete|insert|remove|exec|run)\b/i.test(window);
+      const hasAuth = /\b(?:auth|context\s*\.\s*(?:user|auth|session|token)|requireAuth|isAuthenticated|authorize)\b/i.test(window);
+      return hasDbAccess && !hasAuth;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // WebSocket Security
+  // ════════════════════════════════════════════
+  {
+    id: 'WEBSOCKET_NO_AUTH',
+    category: 'Authentication Issues',
+    description:
+      'WebSocket server created without origin validation or authentication (verifyClient) — any origin can connect.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add a verifyClient callback to validate the origin and/or authenticate connections: new WebSocketServer({ verifyClient: (info) => validateOrigin(info.origin) }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bnew\s+WebSocketServer\s*\(/.test(line)) return false;
+      // Check a window for verifyClient or authentication
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return !/\b(?:verifyClient|authenticate|auth|handleAuth)\b/i.test(window);
+    },
+  },
+  {
+    id: 'WEBSOCKET_BROADCAST_UNSANITIZED',
+    category: 'Cross-Site Scripting (XSS)',
+    description:
+      'WebSocket message broadcast to all clients without sanitization — enables XSS or injection via malicious messages.',
+    severity: 'medium',
+    fix_suggestion:
+      'Sanitize and validate WebSocket messages before broadcasting. Filter or escape HTML/script content, and validate message format.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect patterns like clients.forEach(client => client.send(msg))
+      if (!/\bclients\b.*\b(?:forEach|for)\b.*\bsend\s*\(/.test(line)) return false;
+      // Check if the message is sanitized before broadcast
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), lineIdx + 1)
+        .join(' ');
+      return !/\b(?:sanitize|escape|validate|filter|encode|DOMPurify|xss)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // JWT Edge Cases
+  // ════════════════════════════════════════════
+  {
+    id: 'JWT_ALG_NONE',
+    category: 'Authentication Issues',
+    description:
+      'JWT verification accepts the "none" algorithm — attackers can forge tokens by specifying alg: "none" with no signature.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never allow the "none" algorithm. Explicitly specify only the algorithms you use: jwt.verify(token, key, { algorithms: ["HS256"] }).',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match algorithms array containing 'none'
+      return /algorithms\s*:\s*\[.*['"]none['"]/.test(line);
+    },
+  },
+  {
+    id: 'JWT_DECODE_WITHOUT_VERIFY',
+    category: 'Authentication Issues',
+    description:
+      'jwt.decode() returns an unverified payload — using it for authorization decisions allows token forgery.',
+    severity: 'high',
+    fix_suggestion:
+      'Use jwt.verify() instead of jwt.decode() for any authorization or authentication logic. jwt.decode() does NOT validate the signature.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bjwt\s*\.\s*decode\s*\(/.test(line)) return false;
+      // Check if the decoded value is used for auth decisions in nearby lines
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\b(?:role|admin|isAdmin|is_admin|permission|authorized|auth|user)\b/i.test(window) ||
+        /\bif\s*\(/.test(window);
+    },
+  },
+  {
+    id: 'JWT_BEARER_PREFIX',
+    category: 'Authentication Issues',
+    description:
+      'Authorization header value used directly without stripping the "Bearer " prefix — jwt.verify() will fail or behave unexpectedly.',
+    severity: 'medium',
+    fix_suggestion:
+      'Strip the "Bearer " prefix before verification: const token = req.headers.authorization?.replace("Bearer ", ""); then jwt.verify(token, ...).',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect req.headers.authorization assigned to a variable
+      if (!/\breq\s*\.\s*headers\s*\.\s*authorization\b/.test(line)) return false;
+      // Check if Bearer is stripped in nearby lines
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      // If it's passed directly to jwt.verify or used without .replace/.split/.slice
+      const hasDirectUse = /jwt\s*\.\s*verify\b/.test(window);
+      const hasStrip = /\.\s*(?:replace|split|slice|substring|startsWith)\b/.test(window) || /Bearer/i.test(window);
+      return hasDirectUse && !hasStrip;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cloud Misconfiguration
+  // ════════════════════════════════════════════
+  {
+    id: 'S3_PUBLIC_ACL',
+    category: 'Cloud Misconfiguration',
+    description:
+      'S3 bucket configured with public ACL (public-read, public-read-write) — bucket contents are exposed to the internet.',
+    severity: 'high',
+    fix_suggestion:
+      'Remove public ACL. Use S3 bucket policies with explicit access grants. Enable S3 Block Public Access at the account level.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bACL\s*:\s*['"]public-read(?:-write)?['"]/.test(line) ||
+        /\bpublic-read(?:-write)?\b/.test(line) && /\b(?:s3|bucket|putBucketAcl|PutBucketAcl|putObjectAcl)\b/i.test(line);
+    },
+  },
+  {
+    id: 'S3_CORS_PERMISSIVE',
+    category: 'Cloud Misconfiguration',
+    description:
+      'S3 CORS configuration allows all origins (AllowedOrigins: ["*"]) — any website can make cross-origin requests to this bucket.',
+    severity: 'medium',
+    fix_suggestion:
+      'Specify explicit allowed origins in S3 CORS configuration instead of using a wildcard.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Match AllowedOrigins: ['*'] pattern
+      if (!/AllowedOrigins\s*:\s*\[\s*['"][*]['"]\s*\]/.test(line)) return false;
+      // Verify it's in an S3/CORS context
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\b(?:CORS|CORSRules?|AllowedMethods|s3|bucket)\b/i.test(window);
+    },
+  },
+  {
+    id: 'NEXT_PUBLIC_SECRET',
+    category: 'Sensitive Data Exposure',
+    description:
+      'Environment variable with NEXT_PUBLIC_ prefix contains a secret-sounding name — NEXT_PUBLIC_ vars are exposed to the client bundle.',
+    severity: 'high',
+    fix_suggestion:
+      'Remove the NEXT_PUBLIC_ prefix from secret environment variables. Only use NEXT_PUBLIC_ for values safe to expose to the browser.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bNEXT_PUBLIC_[A-Z_]*(?:SECRET|PRIVATE|PASSWORD|TOKEN|KEY|CREDENTIAL|AUTH)[A-Z_]*\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Supply Chain Attacks
+  // ════════════════════════════════════════════
+  {
+    id: 'DYNAMIC_REQUIRE',
+    category: 'Code Injection',
+    description:
+      'Dynamic require() with user-controlled input — allows arbitrary module loading and code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never pass user input to require(). Use a whitelist/map of allowed modules: const allowed = { "a": require("./a") }.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match require(variable) where the argument is from user input
+      return /\brequire\s*\(\s*req\s*\.\s*(?:body|query|params)\b/.test(line) ||
+        /\brequire\s*\(\s*(?:userInput|input|moduleName|module|path)\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'SUPPLY_CHAIN_POSTINSTALL',
+    category: 'Supply Chain',
+    description:
+      'Package script downloads and executes remote code (curl|sh, wget|bash) — a common supply chain attack vector.',
+    severity: 'critical',
+    fix_suggestion:
+      'Avoid downloading and executing scripts in package lifecycle hooks. Pin dependencies, use lockfiles, and audit package scripts.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match curl/wget piped to sh/bash in package.json scripts context
+      return /\b(?:curl|wget)\s+[^\s|]+\s*\|\s*(?:sh|bash|zsh|node)\b/.test(line) ||
+        /["'](?:postinstall|preinstall|install|prepare|prepublish)\s*["']\s*:\s*["'][^"']*(?:curl|wget)[^"']*\|\s*(?:sh|bash)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Race Conditions
+  // ════════════════════════════════════════════
+  {
+    id: 'RACE_CONDITION_NON_ATOMIC',
+    category: 'Race Condition',
+    description:
+      'Balance/inventory check followed by a separate update without a transaction or lock — vulnerable to race conditions that allow double-spending.',
+    severity: 'high',
+    fix_suggestion:
+      'Use a database transaction with SELECT ... FOR UPDATE, or use an atomic UPDATE with a WHERE clause (e.g., UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND balance >= $1).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect SELECT balance/amount/quantity followed by UPDATE without transaction
+      if (!/\b(?:SELECT|select)\b.*\b(?:balance|amount|quantity|inventory|stock|credits|points|remaining)\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      const hasUpdate = /\b(?:UPDATE|update)\b/.test(window);
+      const hasTransaction = /\b(?:transaction|BEGIN|COMMIT|ROLLBACK|FOR UPDATE|LOCK|serialize|atomic|isolation)\b/i.test(ctx.fileContent);
+      return hasUpdate && !hasTransaction;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // AI/LLM Security (expanded)
+  // ════════════════════════════════════════════
+  {
+    id: 'AI_OUTPUT_EVAL',
+    category: 'AI Security',
+    description:
+      'AI/LLM model output passed to eval() — executing AI-generated code enables arbitrary code execution via prompt injection.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never eval() AI-generated output. Use a sandboxed code execution environment (e.g., vm2, isolated-vm, Web Workers) or parse the output as structured data.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Match eval() with AI-related variable names
+      if (!/\beval\s*\(/.test(line)) return false;
+      return /\b(?:response|completion|result|output|generated|aiResponse|ai_response|message\.content|choices\[)/i.test(line) ||
+        (() => {
+          const lineIdx = ctx.lineNumber - 1;
+          const window = ctx.allLines
+            .slice(Math.max(0, lineIdx - 5), lineIdx + 1)
+            .join(' ');
+          return /\b(?:openai|anthropic|claude|gpt|completions|chat|llm|ai|model)\b/i.test(window);
+        })();
+    },
+  },
+  {
+    id: 'AI_OUTPUT_HTML',
+    category: 'AI Security',
+    description:
+      'AI/LLM model output rendered as raw HTML (innerHTML) — enables XSS if the model output contains malicious HTML/scripts.',
+    severity: 'high',
+    fix_suggestion:
+      'Sanitize AI output with DOMPurify before rendering as HTML, or use textContent instead of innerHTML.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\.innerHTML\s*=/.test(line)) return false;
+      return /\b(?:completion|response|result|output|generated|aiResponse|choices\[|message\.content)\b/i.test(line) ||
+        (() => {
+          const lineIdx = ctx.lineNumber - 1;
+          const window = ctx.allLines
+            .slice(Math.max(0, lineIdx - 5), lineIdx + 1)
+            .join(' ');
+          return /\b(?:openai|anthropic|claude|gpt|completions|chat|llm|ai|model)\b/i.test(window);
+        })();
+    },
+  },
+  {
+    id: 'AI_TOOL_INJECTION',
+    category: 'AI Security',
+    description:
+      'User input passed directly to LLM message content without filtering tool-use or function-call directives — enables tool/function injection.',
+    severity: 'high',
+    fix_suggestion:
+      'Filter user input for tool-use injection patterns (<tool_use>, function_call, <|im_start|>) before passing to LLM APIs. Validate message content and strip control sequences.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Detect user input assigned to a variable and then passed as message content
+      if (!/\brole\s*:\s*['"]user['"]/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      // Must have user input in the content field
+      const hasUserInput = /content\s*:\s*(?:req\s*\.\s*(?:body|query|params)|userMsg|userMessage|userInput|input|message)\b/.test(window);
+      // Must NOT have sanitization
+      const hasSanitize = /\b(?:sanitize|filter|escape|validate|strip|clean)\b/i.test(window);
+      return hasUserInput && !hasSanitize;
+    },
+  },
+  {
+    id: 'AI_PROMPT_LEAK',
+    category: 'AI Security',
+    description:
+      'System prompt or internal AI configuration exposed in an error response or API output — leaks proprietary instructions to users.',
+    severity: 'high',
+    fix_suggestion:
+      'Never include system prompts, internal configuration, or AI instructions in error responses. Log them server-side only.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match patterns where systemPrompt/system_prompt is sent in response
+      return /\bres\s*\.\s*(?:json|send)\s*\([^)]*\b(?:systemPrompt|system_prompt|SYSTEM_PROMPT|instructions|system_message)\b/.test(line) ||
+        /\b(?:prompt|systemPrompt|system_prompt|instructions)\s*:\s*\b(?:systemPrompt|system_prompt|SYSTEM_PROMPT)\b/.test(line) &&
+        /\bres\s*\.\s*(?:json|send)\b/.test(line);
+    },
+  },
+  {
+    id: 'AI_FUNCTION_SCHEMA_INJECTION',
+    category: 'AI Security',
+    description:
+      'User input embedded in LLM function/tool calling schema (parameters, defaults) — enables manipulation of AI tool behavior.',
+    severity: 'high',
+    fix_suggestion:
+      'Never embed user input in function calling schemas. Define schemas statically and pass user input as message content only.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Check for user input in function/tool schemas
+      if (!/\b(?:default|description|enum)\s*:\s*(?:userInput|user_input|input|req\s*\.\s*(?:body|query|params))\b/.test(line)) return false;
+      // Verify this is in a functions/tools context
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 3))
+        .join(' ');
+      return /\b(?:functions|tools|function_call|tool_choice|parameters)\b/.test(window);
+    },
+  },
 ];
 
 // ── File Discovery ──

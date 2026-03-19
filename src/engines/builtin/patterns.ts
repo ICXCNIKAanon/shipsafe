@@ -11563,6 +11563,1244 @@ const RULES: PatternRule[] = [
       return !/\bselect\b/.test(window) && !/\b(?:omit|pick|exclude|sanitize|serialize|toJSON)\b/.test(window);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 51: Django Security
+  // ════════════════════════════════════════════
+  {
+    id: 'DJANGO_RAW_FSTRING',
+    category: 'SQL Injection',
+    description:
+      'Django raw() called with f-string — direct SQL injection vulnerability.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use parameterized raw queries: Model.objects.raw("SELECT * FROM t WHERE id = %s", [user_id]).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.objects\.raw\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_EXTRA_USER_INPUT',
+    category: 'SQL Injection',
+    description:
+      'Django QuerySet .extra() with user-controlled input — deprecated and vulnerable to SQL injection.',
+    severity: 'critical',
+    fix_suggestion:
+      'Replace .extra() with .annotate() using F() and Value() expressions, or use RawSQL with params.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.extra\s*\(/.test(line)) return false;
+      return /\.extra\s*\([^)]*(?:request\.|user_input|f['"`]|\.format\s*\()/.test(line) ||
+        /\.extra\s*\(\s*(?:select|where|tables)\s*=/.test(line) && /\+|%s|\.format|f['"`]|\$\{/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_RAWSQL_INJECTION',
+    category: 'SQL Injection',
+    description:
+      'Django RawSQL() with string interpolation — vulnerable to SQL injection.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use RawSQL with params: RawSQL("SELECT col FROM t WHERE id = %s", [user_id]).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bRawSQL\s*\(\s*f['"`]/.test(line) || /\bRawSQL\s*\(\s*['"`].*%s.*['"`]\s*%/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_CSRF_EXEMPT_SENSITIVE',
+    category: 'CSRF',
+    description:
+      'Django @csrf_exempt on a view that handles sensitive operations — bypasses CSRF protection.',
+    severity: 'high',
+    fix_suggestion:
+      'Remove @csrf_exempt and use proper CSRF tokens. For APIs, use authentication-based CSRF exemption (e.g., DRF TokenAuthentication).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/@csrf_exempt\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return /\b(?:def\s+(?:login|register|signup|transfer|payment|checkout|delete|update|create|change_password|reset_password|admin))\b/.test(window) ||
+        /\b(?:POST|PUT|DELETE|PATCH)\b/.test(window);
+    },
+  },
+  {
+    id: 'DJANGO_DEBUG_TRUE',
+    category: 'Server Misconfiguration',
+    description:
+      'Django DEBUG = True in settings — exposes detailed error pages, stack traces, and SQL queries to attackers.',
+    severity: 'high',
+    fix_suggestion:
+      'Set DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True" and ensure it is False in production.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bDEBUG\s*=\s*True\b/.test(line)) return false;
+      // Only flag in settings files or if not from env var
+      return ctx.filePath.includes('settings') || /^\s*DEBUG\s*=\s*True\s*$/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_ALLOWED_HOSTS_STAR',
+    category: 'Server Misconfiguration',
+    description:
+      'Django ALLOWED_HOSTS = ["*"] — accepts requests for any hostname, enabling host header attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Set ALLOWED_HOSTS to your actual domain names: ALLOWED_HOSTS = ["example.com", "www.example.com"].',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bALLOWED_HOSTS\s*=\s*\[['"`]\*['"`]\]/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_SECRET_KEY_INLINE',
+    category: 'Secrets',
+    description:
+      'Django SECRET_KEY hardcoded in settings.py — compromises session security, CSRF tokens, and password hashing.',
+    severity: 'critical',
+    fix_suggestion:
+      'Load SECRET_KEY from environment: SECRET_KEY = os.environ["DJANGO_SECRET_KEY"].',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bSECRET_KEY\s*=\s*['"`]/.test(line)) return false;
+      // Only if it looks like a real key value (not env var loading)
+      return !/\bos\.environ\b/.test(line) && !/\bconfig\s*\(/.test(line) && !/\benv\s*\(/.test(line) &&
+        /\bSECRET_KEY\s*=\s*['"`][a-zA-Z0-9!@#$%^&*()_+\-=]{8,}['"`]/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_MARK_SAFE_FSTRING',
+    category: 'XSS',
+    description:
+      'Django mark_safe() with f-string containing user data — disables HTML escaping, enabling stored/reflected XSS.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use format_html() instead of mark_safe(f"..."). format_html() auto-escapes variables.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bmark_safe\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_SESSION_NO_HTTPONLY',
+    category: 'Session Security',
+    description:
+      'Django SESSION_COOKIE_HTTPONLY = False — session cookies accessible via JavaScript, enabling session hijacking through XSS.',
+    severity: 'high',
+    fix_suggestion:
+      'Set SESSION_COOKIE_HTTPONLY = True (this is the default — remove the explicit False setting).',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bSESSION_COOKIE_HTTPONLY\s*=\s*False\b/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_JSONRESPONSE_QUERYSET',
+    category: 'Data Exposure',
+    description:
+      'Django JsonResponse with serialized queryset may expose internal model fields and sensitive data.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use explicit field selection with .values() before serializing: JsonResponse(list(qs.values("id", "name")), safe=False).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bJsonResponse\s*\(/.test(line)) return false;
+      return /\bJsonResponse\s*\([^)]*\b(?:serializers\.serialize|model_to_dict|values_list)\b/.test(line) &&
+        !/\bvalues\s*\(/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 52: Flask/FastAPI Security
+  // ════════════════════════════════════════════
+  {
+    id: 'FLASK_SSTI',
+    category: 'Template Injection',
+    description:
+      'Flask render_template_string() with user input — enables Server-Side Template Injection (SSTI) for RCE.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use render_template() with a file-based template instead. Never pass user input to render_template_string().',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\brender_template_string\s*\(/.test(line)) return false;
+      return /\brender_template_string\s*\(\s*(?:f['"`]|request\.|user_input|data|content|body|text|param)/.test(line) ||
+        /\brender_template_string\s*\([^)]*\+/.test(line) ||
+        /\brender_template_string\s*\([^)]*\.format\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_SEND_FILE_USER_PATH',
+    category: 'Path Traversal',
+    description:
+      'Flask send_file() with user-controlled path — enables arbitrary file read via path traversal.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use send_from_directory() with a fixed base directory, or validate/sanitize the filename with secure_filename().',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bsend_file\s*\(/.test(line)) return false;
+      return /\bsend_file\s*\(\s*(?:request\.|f['"`]|user_|filename|path|file_path)/.test(line) &&
+        !/\bsecure_filename\b/.test(line) && !/\bsend_from_directory\b/.test(line);
+    },
+  },
+  {
+    id: 'FASTAPI_NO_CORS_MIDDLEWARE',
+    category: 'Server Misconfiguration',
+    description:
+      'FastAPI application without CORS middleware — may be misconfigured or missing cross-origin protection.',
+    severity: 'medium',
+    fix_suggestion:
+      'Add CORSMiddleware with explicit allowed origins: app.add_middleware(CORSMiddleware, allow_origins=["https://yourdomain.com"]).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bFastAPI\s*\(\s*\)/.test(line)) return false;
+      // Check the entire file for CORSMiddleware
+      return !/\bCORSMiddleware\b/.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'FLASK_APP_SECRET_HARDCODED',
+    category: 'Secrets',
+    description:
+      'Flask app.secret_key set to a hardcoded string — compromises session integrity and signed cookies.',
+    severity: 'critical',
+    fix_suggestion:
+      'Load from environment: app.secret_key = os.environ["FLASK_SECRET_KEY"].',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bapp\.secret_key\s*=\s*['"`]/.test(line)) return false;
+      return !/\bos\.environ\b/.test(line) && !/\bconfig\b/.test(line);
+    },
+  },
+  {
+    id: 'FASTAPI_SQLALCHEMY_TEXT_INTERPOLATION',
+    category: 'SQL Injection',
+    description:
+      'FastAPI route using SQLAlchemy text() with string interpolation — vulnerable to SQL injection.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use bound parameters: text("SELECT * FROM t WHERE id = :id").bindparams(id=user_id).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\btext\s*\(\s*f['"`].*(?:SELECT|INSERT|UPDATE|DELETE)\b/i.test(line) ||
+        /\btext\s*\(\s*['"`].*(?:SELECT|INSERT|UPDATE|DELETE)\b[^'"`]*['"`]\s*\+/i.test(line) ||
+        /\btext\s*\(\s*['"`].*(?:SELECT|INSERT|UPDATE|DELETE)\b[^'"`]*['"`]\s*\.format\s*\(/i.test(line);
+    },
+  },
+  {
+    id: 'FLASK_DEBUG_MODE_PRODUCTION',
+    category: 'Server Misconfiguration',
+    description:
+      'Flask debug mode enabled unconditionally — exposes Werkzeug debugger for remote code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Set debug from environment: app.run(debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true").',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bFLASK_DEBUG\s*=\s*True\b/.test(line) && !/\bapp\.debug\s*=\s*True\b/.test(line)) return false;
+      return !/\bos\.environ\b/.test(line) && !/\bif\b/.test(line);
+    },
+  },
+  {
+    id: 'WERKZEUG_DEBUGGER_PIN',
+    category: 'Secrets',
+    description:
+      'Werkzeug debugger PIN exposed in code — enables authentication bypass to the interactive debugger.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never expose the Werkzeug debugger PIN. Disable the debugger in production entirely.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bWERKZEUG_DEBUG_PIN\s*=\s*['"`]\d+['"`]/.test(line) ||
+        /\bdebugger_pin\s*=\s*['"`]\d+['"`]/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_SESSION_NO_SECURE',
+    category: 'Session Security',
+    description:
+      'Flask session cookie without Secure flag — cookies sent over HTTP, enabling interception.',
+    severity: 'high',
+    fix_suggestion:
+      'Set SESSION_COOKIE_SECURE = True to ensure cookies are only sent over HTTPS.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bSESSION_COOKIE_SECURE\s*=\s*False\b/.test(line);
+    },
+  },
+  {
+    id: 'FASTAPI_HTML_RESPONSE_USER_INPUT',
+    category: 'XSS',
+    description:
+      'FastAPI Response with text/html media type containing user input — vulnerable to reflected XSS.',
+    severity: 'high',
+    fix_suggestion:
+      'Use HTMLResponse with Jinja2 templates that auto-escape, or sanitize user input before including in HTML.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bResponse\s*\(/.test(line)) return false;
+      return /\bResponse\s*\([^)]*(?:content\s*=\s*(?:f['"`]|request\.|user_|data|body))/.test(line) &&
+        /\bmedia_type\s*=\s*['"`]text\/html['"`]/.test(line);
+    },
+  },
+  {
+    id: 'STARLETTE_STATIC_SENSITIVE',
+    category: 'Data Exposure',
+    description:
+      'Starlette StaticFiles serving a sensitive directory — may expose configuration, secrets, or source code.',
+    severity: 'high',
+    fix_suggestion:
+      'Only serve directories containing public assets. Never mount sensitive directories like /etc, home, or project root.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bStaticFiles\s*\(/.test(line)) return false;
+      return /\bStaticFiles\s*\(\s*directory\s*=\s*['"`](?:\/|\.\.\/|~|\/etc|\/home|\.\/src|\.\/config|\.\/\.env)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 53: Python Standard Library Security
+  // ════════════════════════════════════════════
+  {
+    id: 'PYTHON_SUBPROCESS_SHELL_USER_INPUT',
+    category: 'Command Injection',
+    description:
+      'subprocess.run/call/Popen with shell=True and user-controlled input — enables arbitrary command execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use subprocess.run(["cmd", arg1, arg2]) with a list of arguments instead of shell=True.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(/.test(line)) return false;
+      if (!/\bshell\s*=\s*True\b/.test(line)) return false;
+      return /\b(?:request\.|user_input|f['"`]|\.format\s*\(|\+\s*\w)/.test(line) ||
+        /\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_MKTEMP_RACE',
+    category: 'File System',
+    description:
+      'tempfile.mktemp() creates a name but not the file — race condition allows symlink attacks.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use tempfile.mkstemp() (creates file atomically) or tempfile.NamedTemporaryFile().',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\btempfile\.mktemp\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_XML_PARSE_NO_DEFUSE',
+    category: 'XXE',
+    description:
+      'xml.etree.ElementTree.parse() without defusedxml — vulnerable to XXE and billion laughs attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Use defusedxml: from defusedxml.ElementTree import parse.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bElementTree\.parse\s*\(/.test(line) && !/\bdefusedxml\b/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_URLLIB_SSRF',
+    category: 'SSRF',
+    description:
+      'urllib.request.urlopen() with user-controlled URL — enables Server-Side Request Forgery.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate and allowlist URLs before opening. Use a URL validation library to block internal/private IP ranges.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\burlopen\s*\(/.test(line)) return false;
+      return /\burlopen\s*\(\s*(?:request\.|user_|url|f['"`]|input)/.test(line) &&
+        !/\burlopen\s*\(\s*['"`]https?:\/\/[a-zA-Z]/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_FTP_PLAINTEXT',
+    category: 'Network Security',
+    description:
+      'ftplib with plaintext credentials — FTP sends passwords in cleartext, enabling interception.',
+    severity: 'high',
+    fix_suggestion:
+      'Use ftplib.FTP_TLS instead of ftplib.FTP, or switch to SFTP via paramiko.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bFTP\s*\(/.test(line)) return false;
+      if (/\bFTP_TLS\b/.test(line)) return false;
+      // Check if .login() is on the same line or in a nearby window
+      if (/\b\.login\s*\(/.test(line)) return true;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return /\b\.login\s*\(/.test(window);
+    },
+  },
+  {
+    id: 'PYTHON_SMTP_NO_TLS',
+    category: 'Network Security',
+    description:
+      'smtplib.SMTP without TLS — email credentials sent in cleartext, enabling interception.',
+    severity: 'high',
+    fix_suggestion:
+      'Use smtplib.SMTP_SSL or call starttls() before login(): smtp.starttls(); smtp.login(user, password).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bSMTP\s*\(/.test(line)) return false;
+      if (/\bSMTP_SSL\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
+      return /\b\.login\s*\(/.test(window) && !/\bstarttls\s*\(/.test(window);
+    },
+  },
+  {
+    id: 'PYTHON_WEAK_HASH_PASSWORD',
+    category: 'Cryptography',
+    description:
+      'hashlib.md5/sha1 used for password hashing — these algorithms are fast and easily brute-forced.',
+    severity: 'high',
+    fix_suggestion:
+      'Use bcrypt, scrypt, or argon2 for password hashing. These are intentionally slow and salt automatically.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bhashlib\.(?:md5|sha1)\s*\(/.test(line)) return false;
+      return /\b(?:password|passwd|pwd|pass_hash|user_pass)\b/i.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_RANDOM_SECURITY_TOKEN',
+    category: 'Cryptography',
+    description:
+      'random.randint/random.choice used for security tokens — predictable PRNG enables token guessing.',
+    severity: 'high',
+    fix_suggestion:
+      'Use secrets.token_hex(), secrets.token_urlsafe(), or secrets.choice() for security-sensitive randomness.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\brandom\.(?:randint|choice|random|getrandbits|sample)\s*\(/.test(line)) return false;
+      return /\b(?:token|secret|key|nonce|otp|verification|code|csrf|session_id|api_key|auth)\b/i.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 54: Python Data Science / ML Security
+  // ════════════════════════════════════════════
+  {
+    id: 'PYTHON_PICKLE_NETWORK_LOAD',
+    category: 'Deserialization',
+    description:
+      'pickle.loads() on network/untrusted data — enables arbitrary code execution during deserialization.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use JSON, MessagePack, or Protocol Buffers for network data. If pickle is unavoidable, use fickling to audit pickle payloads.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bpickle\.loads?\s*\(/.test(line)) return false;
+      return /\b(?:request\.|response\.|socket|recv|data|payload|body|content|message|network|remote|download)\b/i.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_TORCH_LOAD_UNSAFE',
+    category: 'Deserialization',
+    description:
+      'torch.load() without weights_only=True — loads arbitrary Python objects via pickle, enabling RCE.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use torch.load(path, weights_only=True) or switch to safetensors format for model loading.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\btorch\.load\s*\(/.test(line)) return false;
+      return !/\bweights_only\s*=\s*True\b/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_NUMPY_ALLOW_PICKLE',
+    category: 'Deserialization',
+    description:
+      'numpy.load() with allow_pickle=True — enables arbitrary code execution via crafted .npy files.',
+    severity: 'high',
+    fix_suggestion:
+      'Use numpy.load(path, allow_pickle=False) (the default since NumPy 1.16.3), or use .npz format with savez().',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bnumpy\.load\s*\([^)]*\ballow_pickle\s*=\s*True\b/.test(line) ||
+        /\bnp\.load\s*\([^)]*\ballow_pickle\s*=\s*True\b/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_JOBLIB_UNTRUSTED',
+    category: 'Deserialization',
+    description:
+      'joblib.load() from untrusted source — joblib uses pickle internally, enabling arbitrary code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Only load joblib files from trusted sources. Validate file integrity with checksums before loading.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bjoblib\.load\s*\(/.test(line)) return false;
+      return /\bjoblib\.load\s*\(\s*(?:request\.|url|f['"`]|user_|download|remote|path|input)/.test(line) &&
+        !/\bjoblib\.load\s*\(\s*['"`](?:\.\/|models\/|data\/)/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_EVAL_MODEL_OUTPUT',
+    category: 'Code Injection',
+    description:
+      'eval() called on model/AI output — enables arbitrary code execution from untrusted model responses.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use ast.literal_eval() for simple data structures, or JSON parsing. Never eval() untrusted output.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\beval\s*\(/.test(line)) return false;
+      return /\beval\s*\(\s*(?:model_output|prediction|result|output|response|generated|completion|inference)\b/.test(line);
+    },
+  },
+  {
+    id: 'JUPYTER_HARDCODED_CREDS',
+    category: 'Secrets',
+    description:
+      'Jupyter notebook with hardcoded credentials — notebooks are often shared or committed to version control.',
+    severity: 'high',
+    fix_suggestion:
+      'Use environment variables or a .env file (excluded from git) for credentials in notebooks.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: false,
+    detect: (line, ctx) => {
+      if (!ctx.filePath.endsWith('.py')) return false;
+      // Match common credential patterns in code cells
+      return /\b(?:api_key|apikey|secret_key|password|token|credentials)\s*=\s*['"`][a-zA-Z0-9_\-]{8,}['"`]/.test(line) &&
+        !/\b(?:os\.environ|os\.getenv|config|env\(|\.env)\b/.test(line) &&
+        !/\b(?:test|mock|example|placeholder|xxx|your_)\b/i.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 55: Python Async / aiohttp / httpx
+  // ════════════════════════════════════════════
+  {
+    id: 'AIOHTTP_NO_SSL',
+    category: 'Network Security',
+    description:
+      'aiohttp.ClientSession with SSL verification disabled — enables man-in-the-middle attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Remove ssl=False or use a proper SSL context: ssl=ssl.create_default_context().',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bClientSession\s*\([^)]*\bssl\s*=\s*False\b/.test(line) ||
+        /\b\.(?:get|post|put|delete|patch|request)\s*\([^)]*\bssl\s*=\s*False\b/.test(line);
+    },
+  },
+  {
+    id: 'HTTPX_VERIFY_FALSE',
+    category: 'Network Security',
+    description:
+      'httpx.AsyncClient with verify=False — disables SSL certificate verification, enabling MITM attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Remove verify=False to use default SSL verification. Only disable for development with explicit env check.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bhttpx\.(?:AsyncClient|Client)\s*\([^)]*\bverify\s*=\s*False\b/.test(line) ||
+        /\bhttpx\.(?:get|post|put|delete|patch)\s*\([^)]*\bverify\s*=\s*False\b/.test(line);
+    },
+  },
+  {
+    id: 'ASYNC_FILE_PATH_TRAVERSAL',
+    category: 'Path Traversal',
+    description:
+      'Async file read with user-controlled path — enables arbitrary file access via path traversal.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate the path against a fixed base directory. Use os.path.realpath() and ensure the result starts with the base.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\baiofiles\.open\s*\(/.test(line) && !/\basync\b.*\bopen\s*\(/.test(line)) return false;
+      return /\bopen\s*\(\s*(?:request\.|user_|path|filename|f['"`]|input)/.test(line) &&
+        !/\bos\.path\.(?:realpath|abspath)\b/.test(line);
+    },
+  },
+  {
+    id: 'AIOHTTP_CORS_ALLOW_ALL',
+    category: 'Server Misconfiguration',
+    description:
+      'aiohttp CORS with allow_all_origins — any website can make authenticated requests to your API.',
+    severity: 'high',
+    fix_suggestion:
+      'Specify explicit allowed origins instead of allowing all: cors.add(route, {"*": aiohttp_cors.ResourceOptions(allow_origins=["https://yourdomain.com"])}).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\baiohttp_cors\b.*\ballow_all_origins\s*=\s*True\b/.test(line) ||
+        /\bResourceOptions\s*\([^)]*\ballow_origins\s*=\s*['"`]\*['"`]/.test(line);
+    },
+  },
+  {
+    id: 'ASYNCIO_SUBPROCESS_SHELL',
+    category: 'Command Injection',
+    description:
+      'asyncio.create_subprocess_shell() with user input — enables arbitrary command execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use asyncio.create_subprocess_exec() with a list of arguments instead of shell mode.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bcreate_subprocess_shell\s*\(/.test(line)) return false;
+      return /\bcreate_subprocess_shell\s*\(\s*(?:f['"`]|request\.|user_|input|data|cmd)/.test(line) ||
+        /\bcreate_subprocess_shell\s*\([^)]*\+/.test(line);
+    },
+  },
+  {
+    id: 'AIOHTTP_WS_NO_AUTH',
+    category: 'Authentication',
+    description:
+      'aiohttp WebSocket handler without authentication — any client can connect and interact.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate authentication (token, session) at the start of the WebSocket handler before processing messages.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bweb\.WebSocketResponse\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 15)).join('\n');
+      return !/\b(?:auth|token|session|verify|check_permission|login_required|authenticate)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 56: Python Package Security
+  // ════════════════════════════════════════════
+  {
+    id: 'PYTHON_IMPORTLIB_USER_INPUT',
+    category: 'Code Injection',
+    description:
+      'importlib.import_module() with user-controlled input — enables arbitrary module loading and code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use an allowlist of permitted module names: if module_name in ALLOWED_MODULES: importlib.import_module(module_name).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bimport_module\s*\(/.test(line)) return false;
+      return /\bimport_module\s*\(\s*(?:request\.|user_|input|data|name|module_name|f['"`])/.test(line) &&
+        !/\bimport_module\s*\(\s*['"`][a-zA-Z]/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_DUNDER_IMPORT_USER',
+    category: 'Code Injection',
+    description:
+      '__import__() with user-controlled input — enables arbitrary module loading and code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use an allowlist of permitted modules and importlib.import_module() instead of __import__().',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b__import__\s*\(/.test(line)) return false;
+      return /\b__import__\s*\(\s*(?:request\.|user_|input|data|name|module_name|f['"`])/.test(line) &&
+        !/\b__import__\s*\(\s*['"`][a-zA-Z]/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_SETUP_CMDCLASS',
+    category: 'Supply Chain',
+    description:
+      'setup.py with cmdclass override — can execute arbitrary code during pip install.',
+    severity: 'high',
+    fix_suggestion:
+      'Review cmdclass overrides carefully. Prefer pyproject.toml with build-system configuration over setup.py cmdclass.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bcmdclass\s*=/.test(line)) return false;
+      return ctx.filePath.endsWith('setup.py') && /\bcmdclass\s*=\s*\{/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_PIP_INSTALL_URL',
+    category: 'Supply Chain',
+    description:
+      'pip install from URL in code — can install malicious packages from untrusted sources.',
+    severity: 'high',
+    fix_suggestion:
+      'Pin dependencies in requirements.txt from PyPI. Use --require-hashes for integrity verification.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bsubprocess\b.*\bpip\b.*\binstall\b.*\bhttps?:\/\//.test(line) ||
+        /\bos\.system\b.*\bpip\b.*\binstall\b.*\bhttps?:\/\//.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_REQUIREMENTS_CUSTOM_INDEX',
+    category: 'Supply Chain',
+    description:
+      'requirements.txt with --index-url pointing to custom registry — may install packages from untrusted sources.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use PyPI or a verified private registry. Pin hashes with --require-hashes for integrity.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /--index-url\s+https?:\/\/(?!pypi\.org|files\.pythonhosted\.org)/.test(line) ||
+        /--extra-index-url\s+https?:\/\/(?!pypi\.org|files\.pythonhosted\.org)/.test(line);
+    },
+  },
+  {
+    id: 'PYTHON_PYPIRC_TOKEN',
+    category: 'Secrets',
+    description:
+      '.pypirc with plaintext token or password — credentials for package publishing exposed in code.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use environment variables or keyring for PyPI credentials. Never commit .pypirc to version control.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bpassword\s*=\s*pypi-[a-zA-Z0-9_-]+/.test(line) ||
+        /\btoken\s*=\s*pypi-[a-zA-Z0-9_-]+/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 57: Advanced JS/TS — Prototype & Object
+  // ════════════════════════════════════════════
+  {
+    id: 'JS_DEFINE_PROPERTY_USER_DESCRIPTOR',
+    category: 'Prototype Pollution',
+    description:
+      'Object.defineProperty with user-controlled descriptor — enables property injection and prototype pollution.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate descriptor values before passing to Object.defineProperty. Use a static descriptor or Object.freeze() the descriptor.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bObject\.defineProperty\s*\(/.test(line)) return false;
+      return /\bObject\.defineProperty\s*\([^,]+,\s*(?:request\.|req\.|user_|input|data|body|params|key|prop)/.test(line) ||
+        /\bObject\.defineProperty\s*\([^,]+,\s*[^,]+,\s*(?:request\.|req\.|user_|input|data|body|params)/.test(line);
+    },
+  },
+  {
+    id: 'JS_PROXY_UNCHECKED_TARGET',
+    category: 'Logic Error',
+    description:
+      'Proxy handler without validation on get/set traps — may bypass security checks or expose internals.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate property names in Proxy get/set handlers. Use an allowlist of accessible properties.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bnew\s+Proxy\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const windowStart = Math.max(0, lineIdx - 15);
+      const windowEnd = Math.min(ctx.allLines.length, lineIdx + 15);
+      const window = ctx.allLines.slice(windowStart, windowEnd).join('\n');
+      return /\bget\s*[:]\s*(?:function|\()/.test(window) &&
+        !/\b(?:allowlist|whitelist|allowed|valid|check|validate)\b/i.test(window);
+    },
+  },
+  {
+    id: 'JS_REFLECT_SET_USER_KEY',
+    category: 'Prototype Pollution',
+    description:
+      'Reflect.set with user-controlled key — enables arbitrary property setting and prototype pollution.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate property keys against an allowlist before using Reflect.set. Block __proto__ and constructor.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bReflect\.set\s*\(/.test(line)) return false;
+      return /\bReflect\.set\s*\([^,]+,\s*(?:request\.|user_|input|data|body|params|key|prop|req\.)/.test(line);
+    },
+  },
+  {
+    id: 'JS_WEAKREF_SECURITY_CLEANUP',
+    category: 'Logic Error',
+    description:
+      'WeakRef used for security-sensitive object cleanup — garbage collection timing is non-deterministic, creating race conditions.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use explicit cleanup (try/finally, Symbol.dispose) for security-sensitive resources instead of WeakRef.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bnew\s+WeakRef\s*\(/.test(line)) return false;
+      return /\b(?:session|token|credential|auth|secret|key|permission)\b/i.test(line);
+    },
+  },
+  {
+    id: 'JS_STRUCTURED_CLONE_BYPASS',
+    category: 'Logic Error',
+    description:
+      'structuredClone used to bypass non-cloneable security controls — drops functions, proxies, and closures.',
+    severity: 'medium',
+    fix_suggestion:
+      'Do not use structuredClone to copy security-sensitive objects. Implement custom deep clone that preserves security properties.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bstructuredClone\s*\(/.test(line)) return false;
+      return /\bstructuredClone\s*\(\s*(?:user|session|auth|context|permissions|securityContext)\b/.test(line);
+    },
+  },
+  {
+    id: 'JS_JSON_STRINGIFY_EXPOSE',
+    category: 'Data Exposure',
+    description:
+      'JSON.stringify replacer function may expose hidden or private fields through custom serialization.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use explicit field selection instead of a replacer that transforms values. Consider using toJSON() on the class.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bJSON\.stringify\s*\(/.test(line)) return false;
+      return /\bJSON\.stringify\s*\([^,]+,\s*(?:function|(\([^)]*\)\s*=>))/.test(line) &&
+        /\b(?:password|secret|token|credential|ssn|credit_card|apiKey|private)\b/i.test(line);
+    },
+  },
+  {
+    id: 'JS_SYMBOL_TOPRIMITIVE_OVERRIDE',
+    category: 'Logic Error',
+    description:
+      'Symbol.toPrimitive override in user-provided objects — enables type coercion attacks bypassing security comparisons.',
+    severity: 'medium',
+    fix_suggestion:
+      'Validate input types explicitly using typeof/instanceof before comparison. Do not rely on implicit type coercion.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\[Symbol\.toPrimitive\]/.test(line) && /\b(?:user|input|request|data|body|params)\b/i.test(line);
+    },
+  },
+  {
+    id: 'JS_WITH_STATEMENT',
+    category: 'Scope Pollution',
+    description:
+      'with statement used — creates ambiguous scoping that enables variable injection and makes code analysis unreliable.',
+    severity: 'medium',
+    fix_suggestion:
+      'Remove with statement and use explicit object property access. with is forbidden in strict mode.',
+    auto_fixable: false,
+    fileTypes: ['.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /^\s*with\s*\(/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 58: Advanced JS/TS — Module & Runtime
+  // ════════════════════════════════════════════
+  {
+    id: 'JS_DYNAMIC_IMPORT_INJECTION',
+    category: 'Code Injection',
+    description:
+      'Dynamic import() with user-controlled path — enables loading arbitrary code modules.',
+    severity: 'critical',
+    fix_suggestion:
+      'Use a static allowlist of importable modules: const allowed = {"mod1": () => import("./mod1")}; allowed[name]().',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bimport\s*\(/.test(line)) return false;
+      // Skip static imports: import("./module") or import("module-name")
+      if (/\bimport\s*\(\s*['"`]/.test(line)) return false;
+      return /\bimport\s*\(\s*(?:request\.|user_|input|data|body|params|path|module|name|req\.|url)/.test(line);
+    },
+  },
+  {
+    id: 'JS_VM_RUN_USER_CODE',
+    category: 'Code Injection',
+    description:
+      'vm.runInContext/runInNewContext with user code — enables arbitrary code execution in V8 sandbox (which is escapable).',
+    severity: 'critical',
+    fix_suggestion:
+      'Use isolated-vm or a WebAssembly sandbox instead of Node.js vm module. The vm module is NOT a security boundary.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bvm\.(?:runInContext|runInNewContext|runInThisContext|compileFunction|Script)\s*\(/.test(line)) return false;
+      return /\bvm\.(?:runInContext|runInNewContext|runInThisContext|compileFunction|Script)\s*\(\s*(?:request\.|user_|input|data|body|code|script|userCode|source)/.test(line);
+    },
+  },
+  {
+    id: 'JS_WORKER_USER_SCRIPT',
+    category: 'Code Injection',
+    description:
+      'Worker created with user-controlled script URL — enables loading and executing arbitrary code.',
+    severity: 'high',
+    fix_suggestion:
+      'Use a static Worker script URL. Pass data via postMessage() instead of dynamic script URLs.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bnew\s+Worker\s*\(/.test(line)) return false;
+      // Skip static URLs
+      if (/\bnew\s+Worker\s*\(\s*['"`]/.test(line)) return false;
+      if (/\bnew\s+Worker\s*\(\s*new\s+URL\s*\(\s*['"`]/.test(line)) return false;
+      return /\bnew\s+Worker\s*\(\s*(?:request\.|req\.|user_|input|data|url|path|script)/.test(line);
+    },
+  },
+  {
+    id: 'JS_SHARED_ARRAY_BUFFER_NO_HEADERS',
+    category: 'Security Headers',
+    description:
+      'SharedArrayBuffer used without COOP/COEP headers — modern browsers require these headers for SharedArrayBuffer.',
+    severity: 'medium',
+    fix_suggestion:
+      'Set Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp headers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bnew\s+SharedArrayBuffer\s*\(/.test(line)) return false;
+      return !/\bCross-Origin-Opener-Policy\b/i.test(ctx.fileContent) &&
+        !/\bCross-Origin-Embedder-Policy\b/i.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'JS_ATOMICS_AUTH_RACE',
+    category: 'Race Condition',
+    description:
+      'Atomics used in authentication logic — concurrent access to auth state creates race conditions.',
+    severity: 'high',
+    fix_suggestion:
+      'Use single-threaded auth checks or proper mutex/semaphore patterns. Atomics alone do not prevent TOCTOU races.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bAtomics\.(?:load|store|compareExchange|exchange)\s*\(/.test(line)) return false;
+      return /(?:auth|session|token|permission|login|role|access)/i.test(line);
+    },
+  },
+  {
+    id: 'JS_FINALIZATION_REGISTRY_SENSITIVE',
+    category: 'Logic Error',
+    description:
+      'FinalizationRegistry for security-sensitive cleanup — GC timing is non-deterministic, cleanup may never run.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use explicit cleanup (try/finally, Symbol.dispose, AbortController) instead of FinalizationRegistry for security resources.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bnew\s+FinalizationRegistry\s*\(/.test(line)) return false;
+      return /\b(?:session|token|credential|secret|key|auth|connection|socket)\b/i.test(line);
+    },
+  },
+  {
+    id: 'JS_GLOBALTHIS_MODIFICATION',
+    category: 'Scope Pollution',
+    description:
+      'globalThis directly modified — pollutes global scope, enabling prototype pollution and variable shadowing.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use module-scoped variables or a namespace object instead of modifying globalThis directly.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bglobalThis\s*\[/.test(line) && /=\s*(?!==)/.test(line) ||
+        /\bglobalThis\.\w+\s*=\s*(?!==)/.test(line);
+    },
+  },
+  {
+    id: 'JS_PROCESS_BINDING',
+    category: 'Runtime Security',
+    description:
+      'process.binding() access — exposes internal Node.js C++ bindings, bypassing security restrictions.',
+    severity: 'high',
+    fix_suggestion:
+      'Use public Node.js APIs instead of process.binding(). Internal bindings are unsupported and security-sensitive.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bprocess\.binding\s*\(/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 59: Advanced JS/TS — Stream & Buffer
+  // ════════════════════════════════════════════
+  {
+    id: 'JS_STREAM_NO_BACKPRESSURE',
+    category: 'DoS',
+    description:
+      'Readable stream from user input without backpressure handling — enables memory exhaustion DoS.',
+    severity: 'high',
+    fix_suggestion:
+      'Use pipe() with highWaterMark limits, or implement backpressure via writable.write() return value.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bnew\s+Readable\s*\(/.test(line) && !/\bReadable\.from\s*\(/.test(line)) return false;
+      if (!/\b(?:request|req|socket|body|stream|upload|user)\b/i.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 15)).join('\n');
+      return !/\bhighWaterMark\b/.test(window) && !/\bbackpressure\b/i.test(window);
+    },
+  },
+  {
+    id: 'JS_PIPE_NO_ERROR_HANDLER',
+    category: 'Error Handling',
+    description:
+      'Stream pipe() without error handling — unhandled errors crash the process.',
+    severity: 'medium',
+    fix_suggestion:
+      'Use pipeline() from stream/promises, or add .on("error") handlers to both source and destination streams.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\.pipe\s*\(/.test(line)) return false;
+      if (/\bpipeline\b/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 3), Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
+      return !/\.on\s*\(\s*['"`]error['"`]/.test(window) && !/\b(?:pipeline|pump)\b/.test(window);
+    },
+  },
+  {
+    id: 'JS_TRANSFORM_EVAL_CHUNK',
+    category: 'Code Injection',
+    description:
+      'Transform stream with eval() on chunk data — enables arbitrary code execution from stream input.',
+    severity: 'critical',
+    fix_suggestion:
+      'Parse chunk data with JSON.parse() or a safe parser. Never eval() streamed data.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\beval\s*\(/.test(line)) return false;
+      return /\beval\s*\(\s*(?:chunk|data|buffer|message)\b/.test(line);
+    },
+  },
+  {
+    id: 'JS_WRITABLE_USER_PATH',
+    category: 'Path Traversal',
+    description:
+      'Writable stream to user-controlled path — enables arbitrary file write via path traversal.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate the output path against a fixed base directory. Use path.resolve() and verify it starts with the base.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bcreateWriteStream\s*\(/.test(line)) return false;
+      return /\bcreateWriteStream\s*\(\s*(?:request\.|user_|input|data|body|params|path|filename|req\.)/.test(line) &&
+        !/\bpath\.resolve\b/.test(line);
+    },
+  },
+  {
+    id: 'JS_BLOB_USER_FILE_WRITE',
+    category: 'Path Traversal',
+    description:
+      'Blob from user data written to file with user-controlled name — enables arbitrary file creation.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate filenames with a strict allowlist. Strip path separators and use a fixed output directory.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bnew\s+Blob\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return /\b(?:writeFile|createWriteStream|write)\b/.test(window) &&
+        /\b(?:request\.|user_|input|filename|path|name)\b/.test(window);
+    },
+  },
+  {
+    id: 'JS_TEXT_DECODER_FATAL_FALSE',
+    category: 'Input Validation',
+    description:
+      'TextDecoder with fatal:false silently replaces invalid bytes — may hide encoding-based attacks.',
+    severity: 'low',
+    fix_suggestion:
+      'Use new TextDecoder("utf-8", { fatal: true }) to reject malformed input instead of silently replacing it.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bnew\s+TextDecoder\s*\([^)]*\bfatal\s*:\s*false\b/.test(line);
+    },
+  },
 ];
 
 // ── File Discovery ──

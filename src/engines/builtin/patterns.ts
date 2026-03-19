@@ -18045,6 +18045,1224 @@ const RULES: PatternRule[] = [
       return /reload\s*=\s*True/.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 91: Python Web Security Final (15 rules)
+  // ════════════════════════════════════════════
+  {
+    id: 'DJANGO_TEMPLATE_AUTOESCAPE_OFF',
+    category: 'Cross-Site Scripting',
+    description: 'Django template autoescape disabled — renders user content as raw HTML, enabling XSS.',
+    severity: 'high',
+    fix_suggestion: 'Remove {% autoescape off %} or ensure only trusted content is rendered.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => /autoescape\s*=\s*False/.test(line) || /\{%\s*autoescape\s+off\s*%\}/.test(line),
+  },
+  {
+    id: 'DJANGO_UNVALIDATED_REDIRECT_CHAIN',
+    category: 'Open Redirect',
+    description: 'Django HttpResponseRedirect with chained user input — open redirect via query parameter.',
+    severity: 'high',
+    fix_suggestion: 'Validate redirect URLs against a whitelist of allowed domains before redirecting.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /HttpResponseRedirect\s*\(\s*request\.(GET|POST|META)/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_CACHE_SENSITIVE_DATA',
+    category: 'Information Disclosure',
+    description: 'Django cache.set with potentially sensitive data — may expose PII via cache backend.',
+    severity: 'medium',
+    fix_suggestion: 'Avoid caching sensitive user data. If necessary, encrypt before caching and set short TTLs.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/cache\.set\s*\(/.test(line)) return false;
+      return /\b(password|token|secret|ssn|credit_card|api_key)\b/i.test(line);
+    },
+  },
+  {
+    id: 'FLASK_RENDER_STRING_USER_INPUT',
+    category: 'Server-Side Template Injection',
+    description: 'Flask render_template_string with user input — allows server-side template injection.',
+    severity: 'critical',
+    fix_suggestion: 'Use render_template with a file instead of render_template_string. Never pass user input to template strings.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/render_template_string\s*\(/.test(line)) return false;
+      return /\brequest\b/.test(line) || /\bformat\s*\(/.test(line) || /f['"]/.test(line) || /\%\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_UNSAFE_FILE_EXTENSION',
+    category: 'File Upload',
+    description: 'Flask file upload without extension validation — allows uploading executable files.',
+    severity: 'high',
+    fix_suggestion: 'Use werkzeug.utils.secure_filename and validate file extensions against an allow list.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/request\.files/.test(line)) return false;
+      if (/\.save\s*\(/.test(line)) {
+        // Check if secure_filename is used nearby
+        const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 5).join('\n');
+        return !/secure_filename/.test(nearby) && !/allowed_extensions/.test(nearby);
+      }
+      return false;
+    },
+  },
+  {
+    id: 'FASTAPI_PATH_PARAM_NO_VALIDATION',
+    category: 'Input Validation',
+    description: 'FastAPI path parameter without type validation — may accept unexpected input.',
+    severity: 'medium',
+    fix_suggestion: 'Use Pydantic validators or Path(..., regex=...) to constrain path parameters.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect @app.get("/{something}") where something has no type hint
+      return /\@app\.(get|post|put|delete|patch)\s*\(\s*["'].*\{[a-zA-Z_]+\}/.test(line) &&
+        !/Path\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_LOGGING_SENSITIVE_DATA',
+    category: 'Information Disclosure',
+    description: 'Django logging with sensitive request data — may leak credentials to log files.',
+    severity: 'medium',
+    fix_suggestion: 'Sanitize sensitive fields before logging. Use a log filter to redact passwords, tokens, etc.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\blogger\.\b/.test(line) && !/\blogging\.\b/.test(line)) return false;
+      return /request\.(POST|body|data)\b/.test(line) && /\b(password|token|secret|key|auth)\b/i.test(line);
+    },
+  },
+  {
+    id: 'FLASK_AFTER_REQUEST_NO_SECURITY_HEADERS',
+    category: 'Security Configuration',
+    description: 'Flask after_request without security headers — missing CSP, X-Frame-Options, etc.',
+    severity: 'medium',
+    fix_suggestion: 'Add Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, and Strict-Transport-Security headers.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/@app\.after_request/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join('\n');
+      return !/Content-Security-Policy/.test(nearby) && !/X-Frame-Options/.test(nearby);
+    },
+  },
+  {
+    id: 'FASTAPI_TRUSTED_HOST_MISSING',
+    category: 'Security Configuration',
+    description: 'FastAPI app without TrustedHostMiddleware — vulnerable to host header attacks.',
+    severity: 'medium',
+    fix_suggestion: 'Add TrustedHostMiddleware to validate Host headers: app.add_middleware(TrustedHostMiddleware, allowed_hosts=[...]).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/FastAPI\s*\(/.test(line)) return false;
+      return !ctx.fileContent.includes('TrustedHostMiddleware');
+    },
+  },
+  {
+    id: 'DJANGO_UNSAFE_PICKLE_SESSION',
+    category: 'Deserialization',
+    description: 'Django with PickleSerializer for sessions — enables remote code execution via crafted cookies.',
+    severity: 'critical',
+    fix_suggestion: 'Use JSONSerializer for session serialization: SESSION_SERIALIZER = "django.contrib.sessions.serializers.JSONSerializer".',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => /SESSION_SERIALIZER\s*=.*PickleSerializer/.test(line),
+  },
+  {
+    id: 'FLASK_UNSAFE_RESPONSE_MIMETYPE',
+    category: 'Cross-Site Scripting',
+    description: 'Flask Response with text/html mimetype and user content — enables XSS.',
+    severity: 'high',
+    fix_suggestion: 'Use application/json or text/plain for API responses. Escape HTML content properly.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/Response\s*\(/.test(line)) return false;
+      return /text\/html/.test(line) && /request\b/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_CUSTOM_AUTH_BACKEND_NO_PERMISSION',
+    category: 'Authorization',
+    description: 'Django custom authentication backend without has_perm implementation — may bypass permission checks.',
+    severity: 'high',
+    fix_suggestion: 'Implement has_perm() and has_module_perms() in custom authentication backends.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/class\s+\w+.*Backend/.test(line)) return false;
+      if (!/def\s+authenticate/.test(ctx.fileContent)) return false;
+      return !/def\s+has_perm/.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'FASTAPI_CORS_ALLOW_CREDENTIALS_WILDCARD',
+    category: 'Security Configuration',
+    description: 'FastAPI CORS with allow_credentials=True and wildcard origins — browsers block this but misconfig exposes intent.',
+    severity: 'high',
+    fix_suggestion: 'Specify exact allowed origins instead of wildcards when using credentials.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/CORSMiddleware/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join('\n');
+      return /allow_credentials\s*=\s*True/.test(nearby) && /\[?\s*["']\*["']\s*\]?/.test(nearby);
+    },
+  },
+  {
+    id: 'PYTHON_WERKZEUG_DEBUGGER_PRODUCTION',
+    category: 'Security Configuration',
+    description: 'Werkzeug debugger enabled — provides interactive Python shell to anyone who triggers an error.',
+    severity: 'critical',
+    fix_suggestion: 'Never enable the Werkzeug debugger in production. Use use_debugger=False or remove the parameter.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => /use_debugger\s*=\s*True/.test(line),
+  },
+  {
+    id: 'PYTHON_STARLETTE_GZIP_BOMB',
+    category: 'Denial of Service',
+    description: 'Starlette GZipMiddleware without minimum_size — may decompress gzip bombs.',
+    severity: 'medium',
+    fix_suggestion: 'Set minimum_size parameter and add request size limits to prevent decompression bombs.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/GZipMiddleware/.test(line)) return false;
+      return !/minimum_size/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 92: Python Infrastructure & Cloud (12 rules)
+  // ════════════════════════════════════════════
+  {
+    id: 'BOTO3_S3_PUBLIC_ACL',
+    category: 'Cloud Misconfiguration',
+    description: 'boto3 S3 put_object with public-read ACL — exposes objects to the internet.',
+    severity: 'critical',
+    fix_suggestion: 'Use private ACL and presigned URLs for controlled access. Enable S3 Block Public Access.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/put_object\s*\(/.test(line) && !/upload_file/.test(line)) return false;
+      return /ACL\s*=\s*['"]public-read/.test(line);
+    },
+  },
+  {
+    id: 'BOTO3_SQS_NO_ENCRYPTION',
+    category: 'Cloud Misconfiguration',
+    description: 'boto3 SQS create_queue without KMS encryption — messages stored in plaintext.',
+    severity: 'medium',
+    fix_suggestion: 'Enable SQS encryption: Attributes={"KmsMasterKeyId": "alias/aws/sqs"}.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/create_queue\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 8).join('\n');
+      return !/KmsMasterKeyId/.test(nearby) && !/SqsManagedSseEnabled/.test(nearby);
+    },
+  },
+  {
+    id: 'BOTO3_SNS_HTTP_SUBSCRIPTION',
+    category: 'Cloud Misconfiguration',
+    description: 'boto3 SNS subscription with HTTP protocol — messages transmitted unencrypted.',
+    severity: 'high',
+    fix_suggestion: 'Use HTTPS protocol for SNS subscriptions to encrypt messages in transit.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/subscribe\s*\(/.test(line)) return false;
+      return /Protocol\s*=\s*['"]http['"]/.test(line) && !/https/.test(line);
+    },
+  },
+  {
+    id: 'BOTO3_LAMBDA_WILDCARD_PERMISSIONS',
+    category: 'Cloud Misconfiguration',
+    description: 'boto3 Lambda with wildcard resource permissions — overly permissive IAM policy.',
+    severity: 'high',
+    fix_suggestion: 'Follow least privilege: specify exact ARNs instead of wildcards in Lambda permissions.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/add_permission\s*\(/.test(line) && !/put_function_policy/.test(line)) return false;
+      return /Principal\s*=\s*['"]["*"']/.test(line) || /\*/.test(line);
+    },
+  },
+  {
+    id: 'GCP_CLIENT_NO_AUTH',
+    category: 'Cloud Misconfiguration',
+    description: 'GCP client library initialized with anonymous credentials — bypasses authentication.',
+    severity: 'critical',
+    fix_suggestion: 'Use service account credentials or application default credentials. Remove AnonymousCredentials.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => /AnonymousCredentials\s*\(\s*\)/.test(line),
+  },
+  {
+    id: 'GCP_STORAGE_PUBLIC_BLOB',
+    category: 'Cloud Misconfiguration',
+    description: 'GCP Storage blob made publicly accessible — exposes data to the internet.',
+    severity: 'high',
+    fix_suggestion: 'Use signed URLs for controlled access instead of making blobs public.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => /\.make_public\s*\(\s*\)/.test(line) && /blob/.test(line),
+  },
+  {
+    id: 'AZURE_CONNECTION_STRING_HARDCODED',
+    category: 'Hardcoded Secrets',
+    description: 'Azure connection string hardcoded in source — exposes cloud credentials.',
+    severity: 'critical',
+    fix_suggestion: 'Use environment variables or Azure Key Vault for connection strings.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /DefaultEndpointsProtocol=https?;AccountName=/.test(line) && /AccountKey=/.test(line);
+    },
+  },
+  {
+    id: 'TERRAFORM_CDK_ADMIN_POLICY',
+    category: 'Cloud Misconfiguration',
+    description: 'Terraform CDK with AdministratorAccess policy — grants full account access.',
+    severity: 'critical',
+    fix_suggestion: 'Follow least privilege: create custom policies with only required permissions.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => /AdministratorAccess/.test(line) && /ManagedPolicy|iam_policy|PolicyStatement/.test(line),
+  },
+  {
+    id: 'PULUMI_SECRET_PLAINTEXT',
+    category: 'Hardcoded Secrets',
+    description: 'Pulumi secret stored in plaintext — should use pulumi.secret() for encryption.',
+    severity: 'high',
+    fix_suggestion: 'Use pulumi.Output.secret() to encrypt sensitive values in Pulumi state.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/pulumi\./.test(line)) return false;
+      return /password\s*=\s*["']/.test(line) || /secret_key\s*=\s*["']/.test(line) || /api_key\s*=\s*["']/.test(line);
+    },
+  },
+  {
+    id: 'BOTO3_S3_NO_VERSIONING',
+    category: 'Cloud Misconfiguration',
+    description: 'boto3 S3 create_bucket without versioning — data loss risk from accidental deletes.',
+    severity: 'medium',
+    fix_suggestion: 'Enable S3 bucket versioning: s3.put_bucket_versioning(Bucket=name, VersioningConfiguration={"Status": "Enabled"}).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/create_bucket\s*\(/.test(line)) return false;
+      return !ctx.fileContent.includes('put_bucket_versioning');
+    },
+  },
+  {
+    id: 'BOTO3_RDS_PUBLIC_ACCESS',
+    category: 'Cloud Misconfiguration',
+    description: 'boto3 RDS instance with public access — database exposed to the internet.',
+    severity: 'critical',
+    fix_suggestion: 'Set PubliclyAccessible=False and use VPC security groups for database access.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/create_db_instance\s*\(/.test(line) && !/modify_db_instance\s*\(/.test(line)) return false;
+      return /PubliclyAccessible\s*=\s*True/.test(line);
+    },
+  },
+  {
+    id: 'BOTO3_DYNAMODB_NO_ENCRYPTION',
+    category: 'Cloud Misconfiguration',
+    description: 'boto3 DynamoDB create_table without encryption — data at rest is unencrypted.',
+    severity: 'medium',
+    fix_suggestion: 'Enable encryption at rest: SSESpecification={"Enabled": True, "SSEType": "KMS"}.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/create_table\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 15).join('\n');
+      return !/SSESpecification/.test(nearby);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 93: Node.js Runtime Security (12 rules)
+  // ════════════════════════════════════════════
+  {
+    id: 'PROCESS_ENV_MODIFICATION',
+    category: 'Runtime Security',
+    description: 'process.env modification at runtime — may alter behavior of dependencies or leak env vars.',
+    severity: 'medium',
+    fix_suggestion: 'Avoid modifying process.env at runtime. Use a config object instead.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/process\.env\s*\[/.test(line) && !/process\.env\.\w+\s*=/.test(line)) return false;
+      return /=\s*(?:req\b|request\b|body\b|params\b|query\b|input\b|args\b|user)/.test(line);
+    },
+  },
+  {
+    id: 'CHILD_PROCESS_FORK_USER_ARGS',
+    category: 'Command Injection',
+    description: 'child_process.fork with user-controlled arguments — enables code execution via worker args.',
+    severity: 'critical',
+    fix_suggestion: 'Validate and sanitize all arguments passed to fork(). Use an allow list for module paths.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.fork\s*\(/.test(line)) return false;
+      return /\b(req\b|request\b|body\b|params\b|query\b|input\b|user)/.test(line);
+    },
+  },
+  {
+    id: 'CLUSTER_WORKER_MSG_NO_VALIDATION',
+    category: 'Input Validation',
+    description: 'Cluster worker message handler without input validation — IPC messages treated as trusted.',
+    severity: 'medium',
+    fix_suggestion: 'Validate and type-check all IPC messages before processing them.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /worker\.on\s*\(\s*['"]message['"]/.test(line) || /process\.on\s*\(\s*['"]message['"]/.test(line) &&
+        /JSON\.parse/.test(line);
+    },
+  },
+  {
+    id: 'V8_FLAGS_MANIPULATION',
+    category: 'Runtime Security',
+    description: 'V8 flags set at runtime with user input — can disable security features.',
+    severity: 'critical',
+    fix_suggestion: 'Never allow user input to control V8 flags. Hardcode required flags.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /--(?:allow-natives-syntax|expose-gc|max-old-space-size)/.test(line) && /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'NATIVE_ADDON_USER_PATH',
+    category: 'Code Injection',
+    description: 'Native addon loaded from user-controlled path — enables arbitrary code execution.',
+    severity: 'critical',
+    fix_suggestion: 'Hardcode addon paths. Never allow user input to determine which native modules are loaded.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\brequire\s*\(/.test(line) && !/\.dlopen\s*\(/.test(line)) return false;
+      return /\.node['"]?\s*/.test(line) && /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'WASI_USER_IMPORTS',
+    category: 'Runtime Security',
+    description: 'WASI initialized with user-controlled imports — enables filesystem/network access bypass.',
+    severity: 'high',
+    fix_suggestion: 'Restrict WASI preopens and imports to known safe paths. Never use user input for WASI configuration.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/WASI\s*\(/.test(line) && !/new\s+WASI/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'PERFORMANCE_MARK_SENSITIVE',
+    category: 'Information Disclosure',
+    description: 'performance.mark/measure with sensitive data — may leak info via Performance API.',
+    severity: 'medium',
+    fix_suggestion: 'Do not include sensitive data in performance marks. Use opaque identifiers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/performance\.mark\s*\(/.test(line) && !/performance\.measure\s*\(/.test(line)) return false;
+      return /\b(password|token|secret|key|auth|credential|ssn)\b/i.test(line);
+    },
+  },
+  {
+    id: 'DIAGNOSTICS_CHANNEL_INFO_LEAK',
+    category: 'Information Disclosure',
+    description: 'diagnostics_channel publishing sensitive data — may leak to APM/monitoring tools.',
+    severity: 'medium',
+    fix_suggestion: 'Sanitize data before publishing to diagnostic channels. Remove passwords, tokens, etc.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.publish\s*\(/.test(line) && !/channel\.publish/.test(line)) return false;
+      return /diagnostics_channel/.test(line) && /\b(password|token|secret|key|auth)\b/i.test(line);
+    },
+  },
+  {
+    id: 'WORKER_THREADS_EVAL',
+    category: 'Code Injection',
+    description: 'Worker thread with user-controlled eval code — enables arbitrary code execution.',
+    severity: 'critical',
+    fix_suggestion: 'Pass data to workers via workerData, never as eval code. Use a fixed worker file path.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/new\s+Worker\s*\(/.test(line)) return false;
+      return /eval\s*:\s*true/.test(line) && /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'VM_MODULE_USER_CODE',
+    category: 'Code Injection',
+    description: 'vm.Module or vm.SourceTextModule with user code — sandbox escape possible.',
+    severity: 'critical',
+    fix_suggestion: 'Never run user-provided code in vm.Module. Use isolated-vm or a proper sandbox.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/SourceTextModule\s*\(/.test(line) && !/SyntheticModule\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'INSPECTOR_OPEN_PRODUCTION',
+    category: 'Runtime Security',
+    description: 'Node.js inspector opened at runtime — enables remote debugging and code injection.',
+    severity: 'critical',
+    fix_suggestion: 'Never open the inspector in production. Use --inspect flag only in development.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => /inspector\.open\s*\(/.test(line) || /require\s*\(\s*['"]inspector['"]\s*\).*\.open/.test(line),
+  },
+  {
+    id: 'SHARED_ARRAY_BUFFER_NO_ISOLATION',
+    category: 'Runtime Security',
+    description: 'SharedArrayBuffer used without proper cross-origin isolation headers.',
+    severity: 'medium',
+    fix_suggestion: 'Set Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers when using SharedArrayBuffer.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/new\s+SharedArrayBuffer\s*\(/.test(line)) return false;
+      return !ctx.fileContent.includes('Cross-Origin-Opener-Policy') && !ctx.fileContent.includes('cross-origin-opener-policy');
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 94: TypeScript Type System Exploits (10 rules)
+  // ════════════════════════════════════════════
+  {
+    id: 'TS_TYPE_ASSERTION_BYPASS',
+    category: 'Type Safety',
+    description: 'TypeScript "as any" type assertion on user input — bypasses all type checking.',
+    severity: 'high',
+    fix_suggestion: 'Use proper type guards or Zod/io-ts for runtime validation instead of "as any".',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/as\s+any\b/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'TS_NON_NULL_ASSERTION_USER_INPUT',
+    category: 'Type Safety',
+    description: 'Non-null assertion (!) on user input — may cause runtime crash on null/undefined.',
+    severity: 'medium',
+    fix_suggestion: 'Use optional chaining (?.) or explicit null checks instead of non-null assertions.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Match req.body.field! or params.id! patterns
+      return /\b(req|request|body|params|query)\.\w+!/.test(line) && !/!==/.test(line) && !/!=/.test(line);
+    },
+  },
+  {
+    id: 'TS_CONST_ASSERTION_MUTABLE',
+    category: 'Type Safety',
+    description: 'Const assertion on object later mutated — type lies about immutability.',
+    severity: 'low',
+    fix_suggestion: 'Use Object.freeze() for actual immutability, not just const assertions.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/as\s+const\b/.test(line)) return false;
+      const varMatch = line.match(/(?:const|let)\s+(\w+)\s*=/);
+      if (!varMatch) return false;
+      const varName = varMatch[1];
+      const rest = ctx.allLines.slice(ctx.lineNumber).join('\n');
+      return new RegExp(`${varName}\\s*\\.\\s*\\w+\\s*=`).test(rest) || new RegExp(`${varName}\\s*\\[`).test(rest);
+    },
+  },
+  {
+    id: 'TS_TEMPLATE_LITERAL_TYPE_USER_INPUT',
+    category: 'Input Validation',
+    description: 'Template literal type constructed from user input — type system cannot validate runtime strings.',
+    severity: 'medium',
+    fix_suggestion: 'Add runtime validation for template literal patterns. Types are erased at runtime.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Pattern: casting user input to a template literal type
+      return /as\s+`\$\{/.test(line) && /\b(req|request|body|params|query|input)\b/.test(line);
+    },
+  },
+  {
+    id: 'TS_BRANDED_TYPE_NO_RUNTIME_CHECK',
+    category: 'Type Safety',
+    description: 'Branded/nominal type cast without runtime validation — brand is just a compile-time fiction.',
+    severity: 'medium',
+    fix_suggestion: 'Add runtime validation in the brand constructor function. Types alone cannot enforce invariants.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect: as UserId, as BrandedType, etc. on user input without validation
+      if (!/as\s+[A-Z]\w*Id\b/.test(line) && !/as\s+Branded\w*/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'TS_ENUM_USER_INPUT_NO_GUARD',
+    category: 'Input Validation',
+    description: 'TypeScript enum used with user input without runtime validation — invalid enum values pass through.',
+    severity: 'medium',
+    fix_suggestion: 'Use Object.values(Enum).includes() or a type guard to validate enum values at runtime.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Casting user input directly to an enum type
+      if (!/as\s+[A-Z]\w+(?:Type|Status|Role|Kind|Mode)\b/.test(line)) return false;
+      return /\b(req|request|body|params|query|input)\b/.test(line);
+    },
+  },
+  {
+    id: 'TS_RECORD_TYPE_NO_VALIDATION',
+    category: 'Type Safety',
+    description: 'Record<string, any> used for user input — allows arbitrary keys and values.',
+    severity: 'medium',
+    fix_suggestion: 'Use a specific interface or Zod schema instead of Record<string, any> for user input.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /Record\s*<\s*string\s*,\s*any\s*>/.test(line) && /\b(req|request|body|params|query|input)\b/.test(line);
+    },
+  },
+  {
+    id: 'TS_SATISFIES_WITHOUT_VALIDATION',
+    category: 'Type Safety',
+    description: 'satisfies operator on user input without runtime validation — compile-time only check.',
+    severity: 'medium',
+    fix_suggestion: 'Add runtime validation (Zod, io-ts, etc.) alongside the satisfies operator.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bsatisfies\b/.test(line)) return false;
+      return /\b(req|request|body|params|query|input)\b/.test(line);
+    },
+  },
+  {
+    id: 'TS_PARTIAL_TYPE_MISSING_FIELDS',
+    category: 'Type Safety',
+    description: 'Partial<> type used for security-critical data — required fields may be missing at runtime.',
+    severity: 'medium',
+    fix_suggestion: 'Use Required<> or explicit types for security-critical fields. Add runtime validation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/Partial\s*</.test(line)) return false;
+      return /\b(Auth|Permission|Role|Security|Access|Credential)\b/.test(line);
+    },
+  },
+  {
+    id: 'TS_UNKNOWN_NO_NARROWING',
+    category: 'Type Safety',
+    description: 'unknown type used but narrowed with "as" instead of type guard — unsafe type assertion.',
+    severity: 'medium',
+    fix_suggestion: 'Use typeof/instanceof type guards or a validation library instead of type assertions.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect: (something as SomeType) where something is typed as unknown in context
+      if (!/\bunknown\b/.test(line)) return false;
+      return /as\s+[A-Z]\w+/.test(line) && !/as\s+unknown/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 95: Modern JS/TS Patterns (12 rules)
+  // ════════════════════════════════════════════
+  {
+    id: 'STRUCTURED_CLONE_SENSITIVE',
+    category: 'Information Disclosure',
+    description: 'structuredClone on object with sensitive fields — deep clone may spread secrets.',
+    severity: 'medium',
+    fix_suggestion: 'Explicitly pick only needed fields instead of deep cloning objects with sensitive data.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/structuredClone\s*\(/.test(line)) return false;
+      return /\b(user|session|auth|credentials|config|secrets)\b/i.test(line);
+    },
+  },
+  {
+    id: 'ABORT_CONTROLLER_NO_CLEANUP',
+    category: 'Resource Leak',
+    description: 'AbortController timeout created without cleanup — timer persists after request completes.',
+    severity: 'low',
+    fix_suggestion: 'Call clearTimeout on the abort timer in a finally block, or use AbortSignal.timeout().',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/AbortSignal\.timeout\s*\(/.test(line) && !/new\s+AbortController/.test(line)) return false;
+      if (/AbortSignal\.timeout/.test(line)) return false; // timeout() is safe
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 15).join('\n');
+      return /setTimeout/.test(nearby) && !/clearTimeout/.test(nearby) && /\.abort\s*\(/.test(nearby);
+    },
+  },
+  {
+    id: 'WEAKREF_SECURITY_GC_RACE',
+    category: 'Race Condition',
+    description: 'WeakRef/WeakMap used for security state — garbage collection may invalidate checks.',
+    severity: 'high',
+    fix_suggestion: 'Use strong references for security-critical data (auth tokens, session state, ACLs).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/WeakRef\s*\(/.test(line) && !/new\s+WeakMap/.test(line) && !/new\s+WeakSet/.test(line)) return false;
+      return /(auth|session|token|permission|role|acl|security)/i.test(line);
+    },
+  },
+  {
+    id: 'SYMBOL_DISPOSE_NO_CLEANUP',
+    category: 'Resource Leak',
+    description: 'Symbol.dispose/Symbol.asyncDispose declared but cleanup logic is empty or missing.',
+    severity: 'medium',
+    fix_suggestion: 'Implement proper resource cleanup in the dispose method (close connections, release locks, etc.).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/Symbol\.(?:async)?Dispose/.test(line) && !/\[Symbol\.dispose\]/.test(line)) return false;
+      const nextLines = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 3).join('\n');
+      return /\{\s*\}/.test(nextLines) || /=>\s*\{\s*\}/.test(nextLines);
+    },
+  },
+  {
+    id: 'ARRAY_FROM_ASYNC_UNTRUSTED',
+    category: 'Denial of Service',
+    description: 'Array.fromAsync with untrusted iterable — infinite iterator causes memory exhaustion.',
+    severity: 'medium',
+    fix_suggestion: 'Add a maximum iteration count or timeout when consuming untrusted async iterables.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/Array\.fromAsync\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user|external)\b/.test(line);
+    },
+  },
+  {
+    id: 'DECORATOR_SIDE_EFFECT',
+    category: 'Code Injection',
+    description: 'Decorator function with network call or eval — side effects during class definition.',
+    severity: 'high',
+    fix_suggestion: 'Decorators should be pure. Move side effects to initialization methods.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/^@/.test(line.trim())) return false;
+      return /\bfetch\s*\(/.test(line) || /\beval\s*\(/.test(line) || /\bexec\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'IMPORT_ASSERTION_BYPASS',
+    category: 'Code Injection',
+    description: 'Dynamic import without type assertion — may load unexpected module types.',
+    severity: 'medium',
+    fix_suggestion: 'Use import assertions: import(url, { assert: { type: "json" } }) for non-JS imports.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bimport\s*\(/.test(line)) return false;
+      if (/assert\s*:/.test(line) || /with\s*:/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'ITERATOR_HELPER_UNTRUSTED',
+    category: 'Denial of Service',
+    description: 'Iterator helper (map/filter/take) on untrusted data without limit — may process infinite stream.',
+    severity: 'medium',
+    fix_suggestion: 'Use .take(maxCount) before processing untrusted iterables to prevent infinite loops.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.values\(\)\s*\.(?:map|filter|flatMap|reduce)\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user|external)\b/.test(line);
+    },
+  },
+  {
+    id: 'TEMPORAL_API_USER_TIMEZONE',
+    category: 'Input Validation',
+    description: 'Temporal API with user-controlled timezone — may cause invalid timezone errors or logic bypass.',
+    severity: 'low',
+    fix_suggestion: 'Validate timezone strings against Intl.supportedValuesOf("timeZone") before using.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/Temporal\.\w+/.test(line)) return false;
+      return /timeZone\s*:\s*(?:req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'USING_DECLARATION_NO_DISPOSE',
+    category: 'Resource Leak',
+    description: 'using/await using declaration on object without dispose implementation — resource leak.',
+    severity: 'medium',
+    fix_suggestion: 'Ensure the object implements Symbol.dispose or Symbol.asyncDispose before using with "using" declarations.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect: using x = someFunc() where we can't verify dispose exists
+      return /\busing\s+\w+\s*=\s*(?:new\s+)?\w+\s*\(/.test(line) && !/await\s+using/.test(line);
+    },
+  },
+  {
+    id: 'PROXY_HANDLER_NO_INVARIANT',
+    category: 'Type Safety',
+    description: 'Proxy handler without invariant checks — may violate object model constraints.',
+    severity: 'medium',
+    fix_suggestion: 'Implement proper invariant checks in Proxy traps (e.g., getOwnPropertyDescriptor consistency).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/new\s+Proxy\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'REGEXP_USER_INPUT_NO_ESCAPE',
+    category: 'ReDoS',
+    description: 'RegExp constructor with user input — enables ReDoS or regex injection attacks.',
+    severity: 'high',
+    fix_suggestion: 'Escape user input with a regex-escape function before using in RegExp constructor.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/new\s+RegExp\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 96: Edge Runtime & Vercel Specific (10 rules)
+  // ════════════════════════════════════════════
+  {
+    id: 'EDGE_MIDDLEWARE_NO_AUTH',
+    category: 'Authorization',
+    description: 'Next.js Edge middleware without authentication check — allows unauthenticated access.',
+    severity: 'high',
+    fix_suggestion: 'Add authentication checks in middleware.ts. Verify JWT or session before allowing access.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/export\s+(?:default\s+)?function\s+middleware/.test(line) && !/export\s+(?:const|async)/.test(line)) return false;
+      if (!/middleware/.test(ctx.filePath.toLowerCase())) return false;
+      return !ctx.fileContent.includes('getToken') && !ctx.fileContent.includes('auth(') &&
+        !ctx.fileContent.includes('session') && !ctx.fileContent.includes('jwt') &&
+        !ctx.fileContent.includes('NextAuth') && !ctx.fileContent.includes('clerk');
+    },
+  },
+  {
+    id: 'VERCEL_KV_USER_KEY',
+    category: 'Injection',
+    description: 'Vercel KV store with user-controlled key — enables cache poisoning or data leakage.',
+    severity: 'high',
+    fix_suggestion: 'Prefix user-controlled keys with a namespace and validate key format.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/kv\.(get|set|del|hget|hset)\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'VERCEL_BLOB_NO_ACCESS_CONTROL',
+    category: 'Authorization',
+    description: 'Vercel Blob upload without access control — uploaded files may be publicly accessible.',
+    severity: 'high',
+    fix_suggestion: 'Set access: "private" in blob.put() and use authenticated download URLs.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/blob\.\s*put\s*\(/.test(line) && !/put\s*\(.*blob/.test(line)) return false;
+      return !/access\s*:\s*['"]private/.test(line);
+    },
+  },
+  {
+    id: 'ISR_USER_REVALIDATION',
+    category: 'Cache Poisoning',
+    description: 'ISR revalidation with user-controlled time — enables cache manipulation attacks.',
+    severity: 'medium',
+    fix_suggestion: 'Hardcode revalidation times. Never allow user input to control cache TTL.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/revalidate\s*[:=]/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user|searchParams)\b/.test(line);
+    },
+  },
+  {
+    id: 'ON_DEMAND_REVALIDATION_NO_SECRET',
+    category: 'Authorization',
+    description: 'On-demand ISR revalidation endpoint without secret validation — allows cache busting.',
+    severity: 'high',
+    fix_suggestion: 'Validate a shared secret in the revalidation API route: if (req.query.secret !== process.env.REVALIDATION_SECRET).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/revalidatePath\s*\(/.test(line) && !/revalidateTag\s*\(/.test(line)) return false;
+      return !ctx.fileContent.includes('secret') && !ctx.fileContent.includes('REVALIDATION') &&
+        !ctx.fileContent.includes('authorization') && !ctx.fileContent.includes('Bearer');
+    },
+  },
+  {
+    id: 'VERCEL_CRON_NO_AUTH',
+    category: 'Authorization',
+    description: 'Vercel Cron endpoint without authorization header check — accessible by anyone.',
+    severity: 'high',
+    fix_suggestion: 'Verify the CRON_SECRET header: if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/cron/.test(ctx.filePath.toLowerCase())) return false;
+      if (!/export\s+(?:async\s+)?function\s+(?:GET|POST)/.test(line)) return false;
+      return !ctx.fileContent.includes('CRON_SECRET') && !ctx.fileContent.includes('authorization');
+    },
+  },
+  {
+    id: 'AI_SDK_PROMPT_INJECTION',
+    category: 'Prompt Injection',
+    description: 'Vercel AI SDK with unvalidated user content in system prompt — enables prompt injection.',
+    severity: 'high',
+    fix_suggestion: 'Separate system and user messages. Never interpolate user input into system prompts.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/role\s*:\s*['"]system['"]/.test(line)) return false;
+      return /\$\{.*(?:req|request|body|params|query|input|user)\b/.test(line) ||
+        /\+\s*(?:req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'VERCEL_ANALYTICS_PII',
+    category: 'Privacy',
+    description: 'Analytics event tracking with PII data — may violate GDPR/privacy regulations.',
+    severity: 'medium',
+    fix_suggestion: 'Remove PII (email, name, IP, phone) from analytics events. Use anonymized identifiers.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/track\s*\(/.test(line) && !/analytics\.\w+\s*\(/.test(line)) return false;
+      return /\b(email|phone|name|address|ssn|ip_address|creditCard)\b/i.test(line);
+    },
+  },
+  {
+    id: 'EDGE_RUNTIME_SECRETS_EXPOSURE',
+    category: 'Information Disclosure',
+    description: 'Secrets accessed in edge runtime — edge functions may log or expose env vars.',
+    severity: 'medium',
+    fix_suggestion: 'Minimize secret access in edge runtime. Use encrypted tokens instead of raw secrets.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/export\s+const\s+runtime\s*=\s*['"]edge['"]/.test(ctx.fileContent)) return false;
+      return /process\.env\.(DATABASE_URL|SECRET_KEY|API_SECRET|PRIVATE_KEY)/.test(line);
+    },
+  },
+  {
+    id: 'NEXT_SERVER_ACTION_NO_AUTH',
+    category: 'Authorization',
+    description: 'Next.js server action without authentication check — callable by any client.',
+    severity: 'high',
+    fix_suggestion: 'Add auth() or getServerSession() at the top of every server action that modifies data.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/['"]use server['"]/.test(ctx.fileContent)) return false;
+      if (!/export\s+async\s+function\s+\w+/.test(line)) return false;
+      const funcBody = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join('\n');
+      return !/(auth|getServerSession|getSession|currentUser|requireAuth|clerk|getToken)\s*\(/.test(funcBody);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 97: Deno & Bun Patterns (8 rules)
+  // ════════════════════════════════════════════
+  {
+    id: 'DENO_RUN_USER_CMD',
+    category: 'Command Injection',
+    description: 'Deno.run/Deno.Command with user-controlled command — enables arbitrary command execution.',
+    severity: 'critical',
+    fix_suggestion: 'Never pass user input to Deno.run/Deno.Command. Use an allow list of commands.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/Deno\.(run|Command)\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'BUN_SPAWN_SHELL',
+    category: 'Command Injection',
+    description: 'Bun.spawn with shell option or user input — enables command injection.',
+    severity: 'critical',
+    fix_suggestion: 'Never use shell: true with user input. Pass command as an array without shell interpretation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/Bun\.spawn\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'DENO_KV_USER_KEY',
+    category: 'Injection',
+    description: 'Deno KV with user-controlled key — enables data access bypass or poisoning.',
+    severity: 'high',
+    fix_suggestion: 'Validate and namespace KV keys. Never use raw user input as KV keys.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/kv\.(get|set|delete|list)\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'BUN_SQLITE_RAW_QUERY',
+    category: 'SQL Injection',
+    description: 'Bun SQLite with raw query interpolation — vulnerable to SQL injection.',
+    severity: 'critical',
+    fix_suggestion: 'Use parameterized queries with db.prepare() instead of string interpolation.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.query\s*\(\s*`/.test(line) && !/\.run\s*\(\s*`/.test(line)) return false;
+      return /\$\{/.test(line) && /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'DENO_PERMISSIONS_BYPASS',
+    category: 'Runtime Security',
+    description: 'Deno --allow-all flag or overly permissive permissions — bypasses Deno security sandbox.',
+    severity: 'high',
+    fix_suggestion: 'Use granular permissions: --allow-read=./data --allow-net=api.example.com instead of --allow-all.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /--allow-all/.test(line) || /--allow-run(?!=)/.test(line) && !/--allow-run=\w/.test(line);
+    },
+  },
+  {
+    id: 'BUN_FILE_PATH_TRAVERSAL',
+    category: 'Path Traversal',
+    description: 'Bun.file with user-controlled path — enables path traversal and arbitrary file read.',
+    severity: 'high',
+    fix_suggestion: 'Validate and sanitize file paths. Use path.resolve and check against an allowed directory.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/Bun\.file\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'DENO_READ_FILE_NO_PERMISSION',
+    category: 'Authorization',
+    description: 'Deno.readFile with user input without permission scoping — may read arbitrary files.',
+    severity: 'high',
+    fix_suggestion: 'Scope Deno permissions to specific directories and validate paths against allow list.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/Deno\.(readFile|readTextFile)\s*\(/.test(line)) return false;
+      return /\b(req|request|body|params|query|input|user)\b/.test(line);
+    },
+  },
+  {
+    id: 'BUN_SERVE_NO_TLS',
+    category: 'Security Configuration',
+    description: 'Bun.serve without TLS configuration — traffic transmitted in plaintext.',
+    severity: 'medium',
+    fix_suggestion: 'Add tls option to Bun.serve: Bun.serve({ tls: { cert, key }, ... }).',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/Bun\.serve\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join('\n');
+      return !/tls\s*:/.test(nearby) && !/https/.test(nearby);
+    },
+  },
 ];
 
 // ── File Discovery ──

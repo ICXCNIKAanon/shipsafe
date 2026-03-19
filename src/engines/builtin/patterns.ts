@@ -2863,6 +2863,396 @@ const RULES: PatternRule[] = [
       return /\/var\/run\/docker\.sock/.test(line);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 1: Authentication & Session Management
+  // ════════════════════════════════════════════
+  {
+    id: 'AUTH_LOCALSTORAGE_SENSITIVE',
+    category: 'Authentication Issues',
+    description:
+      'Sensitive data (password, token, JWT, session, secret) stored in localStorage or sessionStorage — accessible to any JavaScript on the page, including XSS payloads.',
+    severity: 'high',
+    fix_suggestion:
+      'Never store passwords, tokens, or secrets in localStorage/sessionStorage. Use httpOnly cookies for session management, or a secure token storage strategy.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:localStorage|sessionStorage)\s*\.\s*setItem\s*\(/.test(line)) return false;
+      const lower = line.toLowerCase();
+      return (
+        lower.includes('password') ||
+        lower.includes('token') ||
+        lower.includes('jwt') ||
+        lower.includes('session') ||
+        lower.includes('secret') ||
+        lower.includes('auth') ||
+        lower.includes('credential')
+      );
+    },
+  },
+  {
+    id: 'AUTH_BYPASS_OR_OPERATOR',
+    category: 'Authentication Issues',
+    description:
+      'Authorization check uses || with user-controlled input (req.query, req.body, req.params) — allows bypass by setting the query parameter.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never use user-supplied input in authorization conditions with ||. Validate roles/permissions from session data only.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Detect patterns like: if (user.role === 'admin' || req.query.admin)
+      if (!/\|\|/.test(line)) return false;
+      if (!/\bif\s*\(/.test(line)) return false;
+      const hasRoleCheck = /\b(?:role|isAdmin|is_admin|admin|permission|authorized)\b/i.test(line);
+      const hasUserInput = /\breq\s*\.\s*(?:query|body|params)\b/.test(line);
+      return hasRoleCheck && hasUserInput;
+    },
+  },
+  {
+    id: 'AUTH_REMEMBER_ME_NO_EXPIRY',
+    category: 'Authentication Issues',
+    description:
+      'Remember-me or persistent session cookie set without expiry (maxAge/expires) — the token may persist indefinitely.',
+    severity: 'medium',
+    fix_suggestion:
+      'Always set maxAge or expires on persistent cookies: res.cookie("remember_me", token, { maxAge: 7 * 24 * 60 * 60 * 1000, httpOnly: true, secure: true }).',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bres\s*\.\s*cookie\s*\(/.test(line)) return false;
+      const lower = line.toLowerCase();
+      if (!lower.includes('remember') && !lower.includes('persist') && !lower.includes('stay_logged')) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return !/\b(?:maxAge|max_age|expires)\b/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 2: API Security
+  // ════════════════════════════════════════════
+  {
+    id: 'API_KEY_IN_URL',
+    category: 'Sensitive Data Exposure',
+    description:
+      'API key or secret passed in URL query string — visible in server logs, browser history, and referrer headers.',
+    severity: 'high',
+    fix_suggestion:
+      'Pass API keys in the Authorization header or a custom request header instead of the URL query string.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Template literal: fetch(`...?key=${apiKey}`)
+      if (/\?[^`'"]*(?:key|apiKey|api_key|token|secret|access_token)\s*=\s*\$\{/.test(line)) return true;
+      // Concat: "...?apiKey=" + secretKey
+      if (/\?[^"']*(?:key|apiKey|api_key|token|secret|access_token)\s*=\s*["']\s*\+/.test(line)) return true;
+      return false;
+    },
+  },
+  {
+    id: 'API_INTERNAL_ID_EXPOSURE',
+    category: 'Sensitive Data Exposure',
+    description:
+      'API endpoint returns raw database query results that may include internal IDs (_id, auto-increment id) — leaks internal implementation details.',
+    severity: 'low',
+    fix_suggestion:
+      'Map database results to DTOs that only include fields clients need. Use UUIDs as public identifiers instead of sequential database IDs.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // Route handler that does SELECT ... and returns directly
+      if (!/\bres\s*\.\s*json\s*\(/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 1))
+        .join(' ');
+      // Query selects id or _id explicitly
+      const selectsIds = /\bSELECT\b[^)]*\b(?:\bid\b|_id)\b/i.test(window);
+      const hasDirectReturn = /\bres\s*\.\s*json\s*\(\s*(?:users|results?|rows|data|records)\b/.test(line);
+      return selectsIds && hasDirectReturn;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 3: File System Security
+  // ════════════════════════════════════════════
+  {
+    id: 'FS_PERMISSION_WORLD_WRITABLE',
+    category: 'Insecure Configuration',
+    description:
+      'File permission set to 0o777 (world-readable, writable, executable) — any user on the system can read, modify, or execute the file.',
+    severity: 'high',
+    fix_suggestion:
+      'Use restrictive permissions: 0o644 for files (owner read/write, others read) or 0o600 for sensitive files (owner only).',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bchmod(?:Sync)?\s*\([^,]+,\s*0o777\s*\)/.test(line) ||
+        /\bchmod(?:Sync)?\s*\([^,]+,\s*0?777\s*\)/.test(line) ||
+        /\bmode\s*:\s*0o777\b/.test(line);
+    },
+  },
+  {
+    id: 'FS_WRITE_EXECUTABLE_PATH',
+    category: 'Code Injection',
+    description:
+      'Writing user-controlled content to an executable system path (/usr/bin, /usr/local/bin, etc.) — enables arbitrary code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Never write user content to executable paths. Write to a sandboxed directory and validate file contents before any processing.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:writeFile|writeFileSync|createWriteStream)\s*\(/.test(line)) return false;
+      return /['"`]\/(?:usr\/(?:local\/)?bin|bin|sbin|opt)\//.test(line) &&
+        /\breq\s*\.\s*(?:body|file|files)\b/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 4: Encoding & Data Handling
+  // ════════════════════════════════════════════
+  {
+    id: 'UNSAFE_PARSEINT',
+    category: 'Data Handling',
+    description:
+      'parseInt() called on user input without specifying a radix — can produce unexpected results with inputs starting with "0" (octal) or "0x" (hex).',
+    severity: 'low',
+    fix_suggestion:
+      'Always specify radix 10: parseInt(value, 10). Or use Number() for stricter numeric conversion.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // parseInt(req.query.xxx) or parseInt(userInput) without second arg
+      if (!/\bparseInt\s*\(\s*req\s*\.\s*(?:query|params|body)\b/.test(line)) return false;
+      // Check that there's no second argument (radix)
+      // Match parseInt(req.query.foo) but not parseInt(req.query.foo, 10)
+      return /\bparseInt\s*\(\s*req\s*\.\s*(?:query|params|body)\s*\.\s*[a-zA-Z_]+\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'BUFFER_NO_ENCODING',
+    category: 'Data Handling',
+    description:
+      'Buffer.from() called on user input without specifying an encoding — can lead to unexpected behavior if the input is not UTF-8.',
+    severity: 'low',
+    fix_suggestion:
+      'Always specify encoding: Buffer.from(data, "utf-8"). For binary data, use Buffer.from(data, "base64") or "hex".',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      // Buffer.from(req.body.xxx) without second arg
+      if (!/\bBuffer\s*\.\s*from\s*\(\s*req\s*\.\s*(?:body|query)\b/.test(line)) return false;
+      return /\bBuffer\s*\.\s*from\s*\(\s*req\s*\.\s*(?:body|query)\s*\.\s*[a-zA-Z_]+\s*\)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 5: Error Handling & Logging
+  // ════════════════════════════════════════════
+  {
+    id: 'DEBUG_ENDPOINT',
+    category: 'Insecure Configuration',
+    description:
+      'Debug or diagnostic endpoint detected — may expose sensitive system information (environment variables, memory usage, internals) in production.',
+    severity: 'high',
+    fix_suggestion:
+      'Remove debug endpoints before deploying to production, or protect them with strong authentication and IP allowlisting.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\b(?:app|router)\s*\.\s*(?:get|post|all)\s*\(\s*['"]\/debug\b/.test(line)) return false;
+      return true;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 6: Third-Party Integration
+  // ════════════════════════════════════════════
+  {
+    id: 'WEBHOOK_NO_SIGNATURE',
+    category: 'Authentication Issues',
+    description:
+      'Webhook endpoint parses request body without verifying the signature — attackers can forge webhook events.',
+    severity: 'high',
+    fix_suggestion:
+      'Verify webhook signatures before processing. For Stripe: stripe.webhooks.constructEvent(body, sig, secret). For GitHub: verify HMAC-SHA256 signature.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\s*\.\s*post\s*\(\s*['"]\/webhook/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 10))
+        .join(' ');
+      // Check for signature verification
+      const hasSignatureCheck = /\b(?:constructEvent|verify|signature|sig|hmac|createHmac|timingSafeEqual)\b/i.test(window);
+      return !hasSignatureCheck;
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 7: Database Security (Advanced)
+  // ════════════════════════════════════════════
+  {
+    id: 'MONGO_REGEX_INJECTION',
+    category: 'NoSQL Injection',
+    description:
+      'MongoDB $regex operator used with unsanitized user input — enables ReDoS attacks via regex injection.',
+    severity: 'high',
+    fix_suggestion:
+      'Escape special regex characters in user input before using in $regex. Use a library like escape-string-regexp, or use $text search instead.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\$regex\s*:/.test(line)) return false;
+      // Check for user input
+      if (/\breq\s*\.\s*(?:query|body|params)\b/.test(line)) {
+        // Check for escaping/sanitization in surrounding lines
+        const lineIdx = ctx.lineNumber - 1;
+        const window = ctx.allLines
+          .slice(Math.max(0, lineIdx - 5), lineIdx + 1)
+          .join(' ');
+        return !/\b(?:escape|sanitize|escapeRegex|escape_regex|escapeStringRegexp)\b/i.test(window);
+      }
+      return false;
+    },
+  },
+  {
+    id: 'DB_NO_TLS',
+    category: 'Insecure Configuration',
+    description:
+      'Database connection configured with SSL/TLS explicitly disabled — data transmitted in plaintext, vulnerable to interception.',
+    severity: 'high',
+    fix_suggestion:
+      'Enable SSL/TLS for all database connections: ssl: true or ssl: { rejectUnauthorized: true }. Use sslmode=require for PostgreSQL connection strings.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      // ssl: false in database connection config
+      if (!/\bssl\s*:\s*false\b/.test(line)) return false;
+      // Verify it's in a database connection context
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(Math.max(0, lineIdx - 5), Math.min(ctx.allLines.length, lineIdx + 5))
+        .join(' ');
+      return /\b(?:Pool|Client|createConnection|createPool|knex|sequelize|mongoose|typeorm|prisma|pg|mysql|host|database|connectionString)\b/i.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 8: Container & Infrastructure
+  // ════════════════════════════════════════════
+  {
+    id: 'DEBUG_PORT_EXPOSED',
+    category: 'Insecure Configuration',
+    description:
+      'Node.js debug port (--inspect) bound to 0.0.0.0 — allows remote debugging connections from any IP, enabling remote code execution.',
+    severity: 'critical',
+    fix_suggestion:
+      'Bind the debug port to localhost only: --inspect=127.0.0.1:9229. Never expose the debug port to all interfaces in production.',
+    auto_fixable: true,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /--inspect(?:-brk)?=0\.0\.0\.0/.test(line);
+    },
+  },
+  {
+    id: 'HEALTH_CHECK_INFO_LEAK',
+    category: 'Sensitive Data Exposure',
+    description:
+      'Health check endpoint returns system information (process.memoryUsage, process.uptime, process.env) — leaks internal details to potential attackers.',
+    severity: 'medium',
+    fix_suggestion:
+      'Health check endpoints should only return status information (e.g., { status: "ok" }). Do not expose memory usage, environment variables, or uptime.',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:app|router)\s*\.\s*get\s*\(\s*['"]\/health/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 6))
+        .join(' ');
+      return /\bprocess\s*\.\s*(?:memoryUsage|uptime|env|versions|arch|platform|cpuUsage)\b/.test(window);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 9: Client-Side Security
+  // ════════════════════════════════════════════
+  {
+    id: 'POSTMESSAGE_NO_ORIGIN',
+    category: 'Client-Side Security',
+    description:
+      'postMessage event listener without origin validation — any page can send messages to this window, enabling cross-origin attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Always check event.origin against a trusted origin before processing: if (event.origin !== "https://trusted.com") return;',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/addEventListener\s*\(\s*['"]message['"]/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines
+        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8))
+        .join(' ');
+      return !/\bevent\s*\.\s*origin\b|\borigin\b.*===/.test(window);
+    },
+  },
+  {
+    id: 'WINDOW_OPEN_USER_URL',
+    category: 'Open Redirect',
+    description:
+      'window.open() called with user-controlled URL — enables open redirect and potential phishing attacks.',
+    severity: 'high',
+    fix_suggestion:
+      'Validate the URL against an allowlist of trusted domains before opening. Never pass raw user input to window.open().',
+    auto_fixable: false,
+    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bwindow\s*\.\s*open\s*\(/.test(line)) return false;
+      return /\bwindow\s*\.\s*open\s*\(\s*req\s*\.\s*(?:query|body|params)\b/.test(line) ||
+        /\bwindow\s*\.\s*open\s*\(\s*(?:userUrl|user_url|url|redirectUrl|redirect_url|targetUrl)\b/.test(line);
+    },
+  },
 ];
 
 // ── File Discovery ──

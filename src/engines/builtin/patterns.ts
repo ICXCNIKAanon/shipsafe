@@ -16244,6 +16244,1807 @@ const RULES: PatternRule[] = [
       return !/\b(?:hashFiles|checksum|integrity|verify)\b/i.test(nearby);
     },
   },
+
+  // ════════════════════════════════════════════
+  // Cycle 81: Django ORM & Models Deep (15 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'DJANGO_QUERYSET_EXTRA_SQL',
+    category: 'SQL Injection',
+    description: 'Django QuerySet.extra() with user input — deprecated and prone to SQL injection.',
+    severity: 'critical',
+    fix_suggestion: 'Replace .extra() with .annotate() using F(), Value(), and database functions.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.extra\s*\(/.test(line)) return false;
+      return /\.extra\s*\(\s*(?:select|where|tables)\s*=\s*\{[^}]*(?:request\.|input|f['"`]|\+\s*\w)/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_ANNOTATE_RAWSQL_INJECT',
+    category: 'SQL Injection',
+    description: 'Django annotate() with RawSQL containing string interpolation — SQL injection risk.',
+    severity: 'critical',
+    fix_suggestion: 'Use RawSQL with params argument: annotate(val=RawSQL("SELECT %s", [param])).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.annotate\s*\([^)]*RawSQL\s*\(\s*f['"`]/.test(line) ||
+        /\.annotate\s*\([^)]*RawSQL\s*\(\s*['"][^'"]*%s.*['"].*%\s/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_F_EXPRESSION_USER_STRING',
+    category: 'SQL Injection',
+    description: 'Django F() expression constructed from user-supplied string — potential SQL injection.',
+    severity: 'high',
+    fix_suggestion: 'Validate field names against an allowlist before using in F() expressions.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bF\s*\(\s*(?:request\.|user_input|field_name|param|kwargs|args)/.test(line) ||
+        /\bF\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_SUBQUERY_RAW_SQL',
+    category: 'SQL Injection',
+    description: 'Django Subquery with raw SQL string interpolation — SQL injection risk.',
+    severity: 'critical',
+    fix_suggestion: 'Use Django ORM expressions inside Subquery instead of raw SQL strings.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bSubquery\s*\(\s*(?:RawSQL|raw)\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_DEFER_SENSITIVE_FIELDS',
+    category: 'Data Exposure',
+    description: 'Django QuerySet.only() or defer() may inadvertently expose or trigger lazy load of sensitive fields.',
+    severity: 'medium',
+    fix_suggestion: 'Explicitly list required fields with .only() and ensure sensitive fields like password are never included.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.only\s*\([^)]*(?:password|secret|token|ssn|credit_card|api_key)/.test(line) ||
+        /\.defer\s*\([^)]*\)/.test(line) && /serializ|json|response|return/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_META_ORDERING_USER_INPUT',
+    category: 'SQL Injection',
+    description: 'Django model Meta ordering or order_by() with user-controlled field name — SQL injection risk.',
+    severity: 'high',
+    fix_suggestion: 'Validate sort fields against an allowlist of model field names.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.order_by\s*\(\s*(?:request\.|user_input|sort_field|order_field|params|kwargs)/.test(line) ||
+        /\.order_by\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_CHARFIELD_NO_MAX_LENGTH',
+    category: 'Data Validation',
+    description: 'Django CharField without max_length — can cause database errors or storage abuse.',
+    severity: 'low',
+    fix_suggestion: 'Always specify max_length on CharField: models.CharField(max_length=255).',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bCharField\s*\(/.test(line)) return false;
+      return /\bCharField\s*\(\s*\)/.test(line) || (/\bCharField\s*\(/.test(line) && !/max_length\s*=/.test(line));
+    },
+  },
+  {
+    id: 'DJANGO_FILEFIELD_NO_VALIDATION',
+    category: 'File Upload',
+    description: 'Django FileField without upload_to or validators — files stored in root with no type validation.',
+    severity: 'medium',
+    fix_suggestion: 'Specify upload_to path and add FileExtensionValidator: FileField(upload_to="uploads/", validators=[...]).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bFileField\s*\(/.test(line) && !/\bImageField\s*\(/.test(line)) return false;
+      return !/upload_to\s*=/.test(line) || !/validator/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_JSONFIELD_USER_PATH',
+    category: 'Injection',
+    description: 'Django JSONField queried with user-controlled path — potential NoSQL-style injection.',
+    severity: 'medium',
+    fix_suggestion: 'Validate JSON field lookup paths against an allowlist of expected keys.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.filter\s*\(\s*\*\*\{.*(?:request\.|user_input|param)/.test(line) ||
+        /\.filter\s*\(\s*\*\*(?:request|kwargs|params|filter_args)/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_GENERIC_FK_NO_VALIDATION',
+    category: 'Data Validation',
+    description: 'Django GenericForeignKey without content_type validation — may reference unintended models.',
+    severity: 'medium',
+    fix_suggestion: 'Add limit_choices_to on the content_type ForeignKey to restrict allowed models.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bGenericForeignKey\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber + 5).join(' ');
+      return !/limit_choices_to/.test(nearby);
+    },
+  },
+  {
+    id: 'DJANGO_BULK_CREATE_NO_UNIQUE',
+    category: 'Data Integrity',
+    description: 'Django bulk_create without ignore_conflicts or update_conflicts — may silently fail on duplicate data.',
+    severity: 'low',
+    fix_suggestion: 'Use bulk_create(objs, ignore_conflicts=True) or update_conflicts=True with update_fields.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.bulk_create\s*\(/.test(line)) return false;
+      return !/ignore_conflicts|update_conflicts/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_UPDATE_OR_CREATE_RACE',
+    category: 'Race Condition',
+    description: 'Django update_or_create without select_for_update — race condition under concurrent access.',
+    severity: 'medium',
+    fix_suggestion: 'Wrap update_or_create in a transaction with select_for_update, or use database-level constraints.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\.update_or_create\s*\(/.test(line) && !/\.get_or_create\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 10), ctx.lineNumber).join(' ');
+      return !/select_for_update|atomic|transaction/.test(nearby);
+    },
+  },
+  {
+    id: 'DJANGO_SELECT_FOR_UPDATE_NO_TIMEOUT',
+    category: 'Denial of Service',
+    description: 'Django select_for_update() without timeout — can cause indefinite database lock waits.',
+    severity: 'medium',
+    fix_suggestion: 'Use select_for_update(nowait=True) or wrap in a database query with a timeout.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\.select_for_update\s*\(/.test(line)) return false;
+      return /\.select_for_update\s*\(\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_AGGREGATE_USER_FIELD',
+    category: 'SQL Injection',
+    description: 'Django aggregation with user-controlled field name — potential SQL injection.',
+    severity: 'high',
+    fix_suggestion: 'Validate aggregation field names against a fixed allowlist of model fields.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.aggregate\s*\([^)]*(?:Sum|Avg|Count|Max|Min)\s*\(\s*(?:request\.|user_input|field_name|param|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_VALUES_LIST_SENSITIVE',
+    category: 'Data Exposure',
+    description: 'Django values_list() including sensitive fields — may expose hidden data in API responses.',
+    severity: 'medium',
+    fix_suggestion: 'Exclude sensitive fields from values_list() — never include password, token, or secret fields.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.values_list\s*\([^)]*(?:password|secret_key|api_key|token|ssn|credit_card)/.test(line) ||
+        /\.values\s*\([^)]*(?:password|secret_key|api_key|token|ssn|credit_card)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 82: Django Views & Forms (15 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'DJANGO_FORMVIEW_NO_CSRF',
+    category: 'CSRF',
+    description: 'Django FormView with csrf_exempt decorator — disables CSRF protection on form submission.',
+    severity: 'critical',
+    fix_suggestion: 'Remove @csrf_exempt from FormView. Use Django CSRF middleware for protection.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bclass\b.*\bFormView\b/.test(line)) return false;
+      const above = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 4), ctx.lineNumber - 1).join(' ');
+      return /csrf_exempt/.test(above);
+    },
+  },
+  {
+    id: 'DJANGO_MODELFORM_EXCLUDE',
+    category: 'Data Exposure',
+    description: 'Django ModelForm using exclude instead of fields — new model fields are automatically exposed.',
+    severity: 'high',
+    fix_suggestion: 'Use explicit fields = [...] instead of exclude in ModelForm Meta to prevent accidental exposure.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bexclude\s*=\s*[\[(]/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 10), ctx.lineNumber + 5).join(' ');
+      return /\bclass\s+Meta\b/.test(nearby) && /ModelForm|Form/.test(nearby);
+    },
+  },
+  {
+    id: 'DJANGO_FILE_UPLOAD_NO_SIZE_LIMIT',
+    category: 'Denial of Service',
+    description: 'Django file upload handler without size limit — allows unlimited file uploads.',
+    severity: 'high',
+    fix_suggestion: 'Set DATA_UPLOAD_MAX_MEMORY_SIZE and FILE_UPLOAD_MAX_MEMORY_SIZE in settings, or validate in the view.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bFileUploadHandler\b/.test(line) && !/\bhandler\s*=.*Upload/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, Math.min(ctx.allLines.length, ctx.lineNumber + 15)).join(' ');
+      return !/max.*size|size.*limit|content_length|MAX_UPLOAD/.test(nearby);
+    },
+  },
+  {
+    id: 'DJANGO_STREAMING_USER_CONTENT',
+    category: 'Injection',
+    description: 'Django StreamingHttpResponse with user-controlled content — potential XSS or injection.',
+    severity: 'high',
+    fix_suggestion: 'Sanitize and escape user content before streaming. Set appropriate Content-Type headers.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bStreamingHttpResponse\s*\(\s*(?:request\.|user_|input_|data\b)/.test(line) ||
+        /\bStreamingHttpResponse\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_RESPONSE_USER_CONTENT_TYPE',
+    category: 'Injection',
+    description: 'Django HttpResponse with content_type from user input — can lead to MIME type confusion attacks.',
+    severity: 'high',
+    fix_suggestion: 'Use a fixed allowlist of content types rather than accepting user-supplied values.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bHttpResponse\s*\([^)]*content_type\s*=\s*(?:request\.|user_|input_|param|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_REDIRECT_USER_URL',
+    category: 'Open Redirect',
+    description: 'Django redirect() with user-controlled URL — open redirect vulnerability.',
+    severity: 'high',
+    fix_suggestion: 'Validate redirect URLs against an allowlist of trusted domains, or use url_has_allowed_host_and_scheme().',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bredirect\s*\(/.test(line)) return false;
+      return /\bredirect\s*\(\s*(?:request\.(?:GET|POST|META)|next_url|return_url|redirect_url|url\b|target)/.test(line) ||
+        /\bredirect\s*\(\s*request\.(?:GET|POST)\s*(?:\[|\.get)/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_LOGINVIEW_NO_RATE_LIMIT',
+    category: 'Brute Force',
+    description: 'Django LoginView without rate limiting — vulnerable to brute force credential attacks.',
+    severity: 'high',
+    fix_suggestion: 'Add django-axes, django-ratelimit, or custom throttling to the login view.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bLoginView\b/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/ratelimit|axes|throttle|Throttle|rate_limit|django_ratelimit/.test(allContent);
+    },
+  },
+  {
+    id: 'DJANGO_PASSWORD_RESET_NO_EXPIRY',
+    category: 'Authentication',
+    description: 'Django PasswordResetView without token expiry configuration — tokens may never expire.',
+    severity: 'medium',
+    fix_suggestion: 'Set PASSWORD_RESET_TIMEOUT in settings (default is 3 days in Django 3.1+). Use shorter timeout for production.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bPasswordResetView\b/.test(line) && !/\bpassword_reset\b/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/PASSWORD_RESET_TIMEOUT|token_expires/.test(allContent);
+    },
+  },
+  {
+    id: 'DJANGO_USER_CREATION_NO_PASSWORD_VALIDATION',
+    category: 'Authentication',
+    description: 'Django UserCreationForm without password validation — allows weak passwords.',
+    severity: 'medium',
+    fix_suggestion: 'Ensure AUTH_PASSWORD_VALIDATORS is configured in settings with multiple validators.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bUserCreationForm\b/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/password_validators|validate_password|AUTH_PASSWORD_VALIDATORS|MinimumLengthValidator/.test(allContent);
+    },
+  },
+  {
+    id: 'DJANGO_ADMIN_NO_2FA',
+    category: 'Authentication',
+    description: 'Django admin site without two-factor authentication — admin accounts vulnerable to credential theft.',
+    severity: 'medium',
+    fix_suggestion: 'Add django-otp or django-two-factor-auth to protect the admin site with 2FA.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\badmin\.site\.urls\b/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/otp|two_factor|2fa|OTPAdmin|TwoFactor/.test(allContent);
+    },
+  },
+  {
+    id: 'DJANGO_PERMISSION_NO_LOGIN_URL',
+    category: 'Authorization',
+    description: 'Django permission_required without login_url — unauthenticated users get 403 instead of redirect.',
+    severity: 'low',
+    fix_suggestion: 'Add login_url parameter: @permission_required("app.perm", login_url="/login/").',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bpermission_required\s*\(/.test(line)) return false;
+      return !/login_url\s*=/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_CACHE_PAGE_AUTHENTICATED',
+    category: 'Data Exposure',
+    description: 'Django cache_page on authenticated view — may serve cached user-specific data to other users.',
+    severity: 'high',
+    fix_suggestion: 'Use vary_on_cookie or vary_on_headers, or avoid cache_page on views with user-specific content.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bcache_page\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, Math.min(ctx.allLines.length, ctx.lineNumber + 5)).join(' ');
+      return /login_required|permission_required|IsAuthenticated|request\.user/.test(nearby);
+    },
+  },
+  {
+    id: 'DJANGO_JSONRESPONSE_MODEL_INSTANCE',
+    category: 'Data Exposure',
+    description: 'Django JsonResponse with model instance via __dict__ — may serialize sensitive internal fields.',
+    severity: 'high',
+    fix_suggestion: 'Use Django serializers or explicit field dictionaries instead of __dict__ on model instances.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bJsonResponse\s*\([^)]*\.__dict__/.test(line) ||
+        /\bJsonResponse\s*\(\s*model_to_dict\s*\(/.test(line) && !/fields\s*=/.test(line);
+    },
+  },
+  {
+    id: 'DJANGO_SIMPLE_UPLOADED_NO_TYPE_CHECK',
+    category: 'File Upload',
+    description: 'Django SimpleUploadedFile without content type validation — allows malicious file uploads.',
+    severity: 'medium',
+    fix_suggestion: 'Validate the content_type of uploaded files against an allowlist of expected MIME types.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/request\.FILES/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, Math.min(ctx.allLines.length, ctx.lineNumber + 10)).join(' ');
+      return !/content_type|mime|MIME|file_type|validate|extension/.test(nearby);
+    },
+  },
+  {
+    id: 'DJANGO_INMEMORY_UPLOAD_NO_SIZE',
+    category: 'Denial of Service',
+    description: 'Django InMemoryUploadedFile processed without size validation — memory exhaustion risk.',
+    severity: 'medium',
+    fix_suggestion: 'Check file.size before processing and enforce DATA_UPLOAD_MAX_MEMORY_SIZE in settings.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bInMemoryUploadedFile\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, Math.min(ctx.allLines.length, ctx.lineNumber + 10)).join(' ');
+      return !/\.size|max_size|MAX_MEMORY|size_limit/.test(nearby);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 83: Flask Deep (15 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'FLASK_BLUEPRINT_NO_AUTH',
+    category: 'Authentication',
+    description: 'Flask Blueprint without authentication middleware — routes may be unprotected.',
+    severity: 'high',
+    fix_suggestion: 'Add @login_required or before_request authentication check to the Blueprint.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bBlueprint\s*\(/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/login_required|before_request|jwt_required|token_required|auth_required|before_app_request/.test(allContent);
+    },
+  },
+  {
+    id: 'FLASK_LOGIN_NO_SESSION_PROTECTION',
+    category: 'Session',
+    description: 'Flask-Login without session protection — vulnerable to session fixation attacks.',
+    severity: 'high',
+    fix_suggestion: 'Set login_manager.session_protection = "strong" to regenerate sessions on auth changes.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bLoginManager\s*\(/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/session_protection\s*=\s*['"]strong['"]/.test(allContent);
+    },
+  },
+  {
+    id: 'FLASK_WTF_CSRF_DISABLED',
+    category: 'CSRF',
+    description: 'Flask-WTF CSRF protection explicitly disabled — forms vulnerable to CSRF attacks.',
+    severity: 'critical',
+    fix_suggestion: 'Remove WTF_CSRF_ENABLED = False. Flask-WTF CSRF should always be enabled in production.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /WTF_CSRF_ENABLED\s*=\s*False/.test(line) ||
+        /CSRFProtect.*disable/.test(line) ||
+        /app\.config\s*\[\s*['"]WTF_CSRF_ENABLED['"]\s*\]\s*=\s*False/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_SQLALCHEMY_RAW_SQL',
+    category: 'SQL Injection',
+    description: 'Flask-SQLAlchemy with raw SQL and string interpolation — SQL injection risk.',
+    severity: 'critical',
+    fix_suggestion: 'Use SQLAlchemy text() with bound parameters: db.session.execute(text("SELECT ... WHERE id = :id"), {"id": val}).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /db\.session\.execute\s*\(\s*f['"`]/.test(line) ||
+        /db\.engine\.execute\s*\(\s*f['"`]/.test(line) ||
+        /db\.session\.execute\s*\(\s*['"][^'"]*%s.*['"].*%/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_MAIL_NO_TLS',
+    category: 'Transport Security',
+    description: 'Flask-Mail configured without TLS — email credentials sent in plaintext.',
+    severity: 'high',
+    fix_suggestion: 'Set MAIL_USE_TLS = True or MAIL_USE_SSL = True in Flask config.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /MAIL_USE_TLS\s*=\s*False/.test(line) ||
+        /MAIL_USE_SSL\s*=\s*False/.test(line) && /MAIL_USE_TLS\s*=\s*False/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_SESSION_COOKIE_NO_SIGNING',
+    category: 'Session',
+    description: 'Flask session cookie used without a secret key — sessions can be tampered with.',
+    severity: 'critical',
+    fix_suggestion: 'Set app.secret_key to a strong random value: app.secret_key = os.urandom(32).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bsession\s*\[/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/secret_key\s*=|SECRET_KEY/.test(allContent);
+    },
+  },
+  {
+    id: 'FLASK_RESTFUL_NO_INPUT_VALIDATION',
+    category: 'Data Validation',
+    description: 'Flask-RESTful Resource using raw request.json without reqparse or marshmallow — no input validation.',
+    severity: 'medium',
+    fix_suggestion: 'Use reqparse.RequestParser or marshmallow schema to validate input data.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/request\.json\b|request\.get_json\b/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return /\bResource\b/.test(allContent) && !/reqparse|RequestParser|marshmallow|Schema|validate|pydantic/.test(allContent);
+    },
+  },
+  {
+    id: 'FLASK_CORS_CREDENTIALS_WILDCARD',
+    category: 'CORS',
+    description: 'Flask-CORS with supports_credentials=True and wildcard origin — allows any site to make authenticated requests.',
+    severity: 'critical',
+    fix_suggestion: 'When using supports_credentials=True, specify exact allowed origins instead of wildcard.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bCORS\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), Math.min(ctx.allLines.length, ctx.lineNumber + 5)).join(' ');
+      return /supports_credentials\s*=\s*True/.test(nearby) && /origins?\s*=\s*['"]?\*/.test(nearby);
+    },
+  },
+  {
+    id: 'FLASK_SEND_FROM_DIR_USER_SUBPATH',
+    category: 'Path Traversal',
+    description: 'Flask send_from_directory with user-controlled subdirectory — path traversal risk.',
+    severity: 'high',
+    fix_suggestion: 'Validate and sanitize the filename parameter. Use secure_filename() from werkzeug.utils.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bsend_from_directory\s*\([^)]*(?:request\.|user_|input_|param|filename\b)/.test(line) &&
+        !/secure_filename/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_BEFORE_REQUEST_NO_AUTH_EXCLUSION',
+    category: 'Authentication',
+    description: 'Flask before_request with auth check but no exclusion list — may block health checks and public routes.',
+    severity: 'low',
+    fix_suggestion: 'Add exclusion list for public endpoints: if request.endpoint in EXCLUDE_LIST: return.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bbefore_request\b/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 10)).join(' ');
+      return /auth|login|token/.test(below) && !/exclude|skip|whitelist|public|health|static/.test(below);
+    },
+  },
+  {
+    id: 'FLASK_LIMITER_NOT_GLOBAL',
+    category: 'Denial of Service',
+    description: 'Flask-Limiter instantiated but not applied globally — some routes may have no rate limiting.',
+    severity: 'medium',
+    fix_suggestion: 'Use Limiter with default_limits=["200 per day", "50 per hour"] for global protection.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bLimiter\s*\(/.test(line)) return false;
+      return !/default_limits\s*=/.test(line) && !/default_limits/.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'FLASK_ERRORHANDLER_TRACEBACK',
+    category: 'Information Disclosure',
+    description: 'Flask errorhandler exposing traceback or exception details — information leakage.',
+    severity: 'high',
+    fix_suggestion: 'Log tracebacks server-side and return generic error messages to users.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\berrorhandler\s*\(/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 10)).join(' ');
+      return /traceback|str\s*\(\s*e\s*\)|repr\s*\(\s*e|format_exc|exc_info/.test(below);
+    },
+  },
+  {
+    id: 'FLASK_SESSION_FILESYSTEM_BACKEND',
+    category: 'Session',
+    description: 'Flask-Session with filesystem backend — insecure in multi-server or shared hosting environments.',
+    severity: 'medium',
+    fix_suggestion: 'Use Redis, Memcached, or database backend for Flask-Session in production.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /SESSION_TYPE\s*=\s*['"]filesystem['"]/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_URL_FOR_EXTERNAL_USER_HOST',
+    category: 'Open Redirect',
+    description: 'Flask url_for with _external=True and user-controlled SERVER_NAME — host header injection.',
+    severity: 'high',
+    fix_suggestion: 'Set SERVER_NAME to a fixed value in production config. Do not derive it from request headers.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\burl_for\s*\([^)]*_external\s*=\s*True/.test(line) &&
+        /request\.host|request\.url_root|SERVER_NAME.*request/.test(line);
+    },
+  },
+  {
+    id: 'FLASK_MIGRATE_USER_REVISION',
+    category: 'Code Injection',
+    description: 'Flask-Migrate or Alembic with user-controlled revision ID — allows arbitrary migration execution.',
+    severity: 'high',
+    fix_suggestion: 'Never accept migration revision IDs from user input. Use fixed revision strings.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:upgrade|downgrade|stamp)\s*\(\s*(?:request\.|user_|input_|revision|rev\b)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 84: FastAPI & Pydantic Deep (15 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'FASTAPI_NO_MIDDLEWARE_STACK',
+    category: 'Security Configuration',
+    description: 'FastAPI app without security middleware — missing CORS, TrustedHost, or HTTPS enforcement.',
+    severity: 'medium',
+    fix_suggestion: 'Add TrustedHostMiddleware, HTTPSRedirectMiddleware, and CORSMiddleware to your FastAPI app.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bFastAPI\s*\(/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/TrustedHostMiddleware|HTTPSRedirectMiddleware/.test(allContent);
+    },
+  },
+  {
+    id: 'PYDANTIC_MODEL_NO_VALIDATORS',
+    category: 'Data Validation',
+    description: 'Pydantic model with sensitive fields but no field validators — weak input validation.',
+    severity: 'medium',
+    fix_suggestion: 'Add @field_validator or @validator for fields like email, password, URL to enforce format constraints.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bclass\b.*\bBaseModel\b/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 20)).join(' ');
+      return /(?:password|email|url|phone)\s*:\s*str/.test(below) && !/validator|field_validator|Field\s*\(/.test(below);
+    },
+  },
+  {
+    id: 'FASTAPI_FILE_UPLOAD_NO_SIZE_LIMIT',
+    category: 'Denial of Service',
+    description: 'FastAPI File/UploadFile parameter without size limit — memory exhaustion risk.',
+    severity: 'high',
+    fix_suggestion: 'Check file.size or use a custom middleware to enforce upload size limits.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bUploadFile\b/.test(line) && !/\bFile\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 2), Math.min(ctx.allLines.length, ctx.lineNumber + 15)).join(' ');
+      return !/\.size|max_size|content_length|MAX_UPLOAD|size_limit/.test(nearby);
+    },
+  },
+  {
+    id: 'FASTAPI_BACKGROUND_TASK_USER_FUNC',
+    category: 'Code Injection',
+    description: 'FastAPI BackgroundTask with user-controlled function — remote code execution risk.',
+    severity: 'critical',
+    fix_suggestion: 'Only pass pre-defined functions to BackgroundTask. Never use user input to select functions.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bBackgroundTask\s*\(\s*(?:request\.|user_|input_|getattr|globals|locals)/.test(line) ||
+        /\bbackground_tasks\.add_task\s*\(\s*(?:request\.|user_|getattr|eval|globals)/.test(line);
+    },
+  },
+  {
+    id: 'FASTAPI_DEPENDENCY_NO_SCOPED_SESSION',
+    category: 'Data Integrity',
+    description: 'FastAPI database dependency without scoped session — concurrent requests may share session state.',
+    severity: 'medium',
+    fix_suggestion: 'Use dependency injection with yield to create request-scoped database sessions.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bDepends\s*\(\s*get_db\b/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/\byield\b/.test(allContent) && /Session/.test(allContent);
+    },
+  },
+  {
+    id: 'SQLMODEL_RAW_SQL',
+    category: 'SQL Injection',
+    description: 'SQLModel with raw SQL string interpolation — SQL injection risk.',
+    severity: 'critical',
+    fix_suggestion: 'Use SQLModel query methods with parameters instead of raw SQL string interpolation.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /session\.exec\s*\(\s*(?:text\s*\(\s*)?f['"`]/.test(line) ||
+        /session\.execute\s*\(\s*(?:text\s*\(\s*)?f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'FASTAPI_WEBSOCKET_NO_AUTH',
+    category: 'Authentication',
+    description: 'FastAPI WebSocket endpoint without authentication — allows unauthenticated real-time connections.',
+    severity: 'high',
+    fix_suggestion: 'Validate auth tokens in the WebSocket handshake using query params or first message.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\basync\s+def\s+websocket/.test(line) && !/@\w+\.websocket\s*\(/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 15)).join(' ');
+      return !/auth|token|verify|jwt|bearer|Depends|Security/.test(below);
+    },
+  },
+  {
+    id: 'FASTAPI_EXCEPTION_HANDLER_LEAK',
+    category: 'Information Disclosure',
+    description: 'FastAPI custom exception handler leaking internal error details — information disclosure.',
+    severity: 'high',
+    fix_suggestion: 'Log detailed errors server-side. Return generic error messages to the client.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bexception_handler\b/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 10)).join(' ');
+      return /str\s*\(\s*exc\s*\)|traceback|repr\s*\(\s*exc|exc_info|format_exc/.test(below);
+    },
+  },
+  {
+    id: 'PYDANTIC_ARBITRARY_TYPES',
+    category: 'Data Validation',
+    description: 'Pydantic model with arbitrary_types_allowed — bypasses type validation for custom types.',
+    severity: 'medium',
+    fix_suggestion: 'Avoid arbitrary_types_allowed. Create proper Pydantic validators for custom types.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /arbitrary_types_allowed\s*=\s*True/.test(line);
+    },
+  },
+  {
+    id: 'FASTAPI_MOUNT_NO_PATH_VALIDATION',
+    category: 'Path Traversal',
+    description: 'FastAPI app.mount with user-controlled path — allows mounting at arbitrary routes.',
+    severity: 'high',
+    fix_suggestion: 'Use fixed, hardcoded paths for app.mount(). Never derive mount paths from user input.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.mount\s*\(\s*(?:f['"`]|path_var|user_|request\.|input_)/.test(line);
+    },
+  },
+  {
+    id: 'FASTAPI_UPLOADFILE_NO_CONTENT_TYPE',
+    category: 'File Upload',
+    description: 'FastAPI UploadFile processed without content type validation — allows malicious file uploads.',
+    severity: 'medium',
+    fix_suggestion: 'Check file.content_type against an allowlist before processing the uploaded file.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bUploadFile\b/.test(line)) return false;
+      if (!/\basync\s+def\b/.test(line) && !/\bdef\b/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 15)).join(' ');
+      return !/content_type|mime|MIME|file_type|extension/.test(below);
+    },
+  },
+  {
+    id: 'FASTAPI_RESPONSE_USER_HEADERS',
+    category: 'Header Injection',
+    description: 'FastAPI Response with user-controlled headers — HTTP header injection risk.',
+    severity: 'high',
+    fix_suggestion: 'Validate and sanitize header values. Use an allowlist of permitted header names.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bResponse\s*\([^)]*headers\s*=\s*(?:request\.|user_|input_|\{.*request)/.test(line) ||
+        /\.headers\s*\[\s*(?:request\.|user_|key)\s*\]\s*=/.test(line);
+    },
+  },
+  {
+    id: 'FASTAPI_DEPENDS_NO_ERROR_HANDLING',
+    category: 'Error Handling',
+    description: 'FastAPI Depends chain with yield but no exception handling — may leak resources on error.',
+    severity: 'medium',
+    fix_suggestion: 'Use try/finally with yield dependencies: try: yield session; finally: session.close().',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\byield\b/.test(line)) return false;
+      const above = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 10), ctx.lineNumber).join(' ');
+      if (!/\bdef\b.*\b(?:get_db|get_session|dependency)\b/.test(above)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), Math.min(ctx.allLines.length, ctx.lineNumber + 5)).join(' ');
+      return !/\btry\b|finally/.test(nearby);
+    },
+  },
+  {
+    id: 'STARLETTE_MIDDLEWARE_NO_EXCEPTION',
+    category: 'Error Handling',
+    description: 'Starlette middleware dispatch without exception handling — may crash the server on errors.',
+    severity: 'medium',
+    fix_suggestion: 'Wrap middleware dispatch in try/except to handle errors gracefully.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\basync\s+def\s+dispatch\b/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 15)).join(' ');
+      return /call_next/.test(below) && !/try|except/.test(below);
+    },
+  },
+  {
+    id: 'FASTAPI_STARTUP_BLOCKING',
+    category: 'Performance',
+    description: 'FastAPI startup event with blocking operation — delays server startup and may cause timeouts.',
+    severity: 'low',
+    fix_suggestion: 'Use asyncio for I/O operations in startup events, or run blocking calls in run_in_executor().',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bon_event\s*\(\s*['"]startup['"]/.test(line) && !/\bstartup\b.*\basync\b/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 10)).join(' ');
+      return /time\.sleep|requests\.get|open\s*\(|subprocess/.test(below);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 85: Python Async Deep (12 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'ASYNCIO_SUBPROCESS_SHELL_TRUE',
+    category: 'Command Injection',
+    description: 'asyncio.create_subprocess_shell with user input — command injection risk.',
+    severity: 'critical',
+    fix_suggestion: 'Use asyncio.create_subprocess_exec with a list of arguments instead of shell=True.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bcreate_subprocess_shell\s*\(\s*(?:f['"`]|cmd|command|user_|input_|request\.)/.test(line);
+    },
+  },
+  {
+    id: 'AIOFILES_USER_PATH',
+    category: 'Path Traversal',
+    description: 'aiofiles.open with user-controlled path — path traversal vulnerability.',
+    severity: 'high',
+    fix_suggestion: 'Validate and sanitize file paths. Use os.path.realpath() and check against an allowed base directory.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\baiofiles\.open\s*\(\s*(?:request\.|user_|input_|filename|file_path|path\b)/.test(line) ||
+        /\baiofiles\.open\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'AIOMYSQL_NO_PARAMS',
+    category: 'SQL Injection',
+    description: 'aiomysql query without parameterized arguments — SQL injection risk.',
+    severity: 'critical',
+    fix_suggestion: 'Use parameterized queries: await cursor.execute("SELECT * FROM t WHERE id = %s", (user_id,)).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bcursor\.execute\s*\(\s*f['"`].*(?:SELECT|INSERT|UPDATE|DELETE)/i.test(line) ||
+        /\bawait\s+.*\.execute\s*\(\s*f['"`].*(?:SELECT|INSERT|UPDATE|DELETE)/i.test(line);
+    },
+  },
+  {
+    id: 'ASYNCPG_UNSAFE_QUERY',
+    category: 'SQL Injection',
+    description: 'asyncpg query with string interpolation — SQL injection risk.',
+    severity: 'critical',
+    fix_suggestion: 'Use parameterized queries: await conn.fetch("SELECT * FROM t WHERE id = $1", user_id).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:conn|connection|pool)\.(?:fetch|execute|fetchrow|fetchval)\s*\(\s*f['"`]/.test(line);
+    },
+  },
+  {
+    id: 'AIOREDIS_USER_KEY',
+    category: 'Injection',
+    description: 'aioredis with user-controlled key — may access or modify arbitrary Redis data.',
+    severity: 'high',
+    fix_suggestion: 'Prefix Redis keys with a namespace and validate user input against expected key patterns.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bredis\.(?:get|set|delete|hget|hset|lpush|rpush|sadd)\s*\(\s*(?:f['"`]|request\.|user_|input_)/.test(line) ||
+        /\bawait\s+redis\.(?:get|set|delete|hget|hset)\s*\(\s*(?:f['"`]|request\.)/.test(line);
+    },
+  },
+  {
+    id: 'TRIO_TCP_NO_TLS',
+    category: 'Transport Security',
+    description: 'trio.open_tcp_stream without TLS — data transmitted in plaintext.',
+    severity: 'high',
+    fix_suggestion: 'Use trio.open_ssl_over_tcp_stream for encrypted connections.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\btrio\.open_tcp_stream\b/.test(line)) return false;
+      const nearby = ctx.allLines.slice(ctx.lineNumber - 1, Math.min(ctx.allLines.length, ctx.lineNumber + 5)).join(' ');
+      return !/ssl|tls|starttls/.test(nearby);
+    },
+  },
+  {
+    id: 'ANYIO_USER_TIMEOUT',
+    category: 'Denial of Service',
+    description: 'anyio with user-controlled timeout value — can be set to infinity to cause hangs.',
+    severity: 'medium',
+    fix_suggestion: 'Validate and cap timeout values: timeout = min(float(user_timeout), MAX_TIMEOUT).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:move_on_after|fail_after|CancelScope)\s*\(\s*(?:request\.|user_|input_|timeout_param|int\s*\(\s*request)/.test(line);
+    },
+  },
+  {
+    id: 'ASYNCIO_WAIT_FOR_NO_CLEANUP',
+    category: 'Resource Leak',
+    description: 'asyncio.wait_for without cancellation cleanup — cancelled tasks may leave resources open.',
+    severity: 'medium',
+    fix_suggestion: 'Handle asyncio.TimeoutError and clean up resources: try/except TimeoutError with cleanup logic.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bwait_for\s*\(/.test(line)) return false;
+      const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 3), Math.min(ctx.allLines.length, ctx.lineNumber + 5)).join(' ');
+      return !/try|except.*(?:TimeoutError|CancelledError)|finally/.test(nearby);
+    },
+  },
+  {
+    id: 'AIOHTTP_SESSION_NO_TIMEOUT',
+    category: 'Denial of Service',
+    description: 'aiohttp.ClientSession without timeout — requests may hang indefinitely.',
+    severity: 'medium',
+    fix_suggestion: 'Set timeout: aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)).',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bClientSession\s*\(/.test(line)) return false;
+      return !/timeout\s*=/.test(line);
+    },
+  },
+  {
+    id: 'ASYNC_GENERATOR_NO_CLEANUP',
+    category: 'Resource Leak',
+    description: 'Async generator without proper cleanup — resources may not be released if consumer stops iterating.',
+    severity: 'medium',
+    fix_suggestion: 'Use try/finally in async generators to ensure cleanup when iteration is interrupted.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\basync\s+def\b/.test(line)) return false;
+      const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 20)).join(' ');
+      return /\byield\b/.test(below) && /open\(|connect|Session|cursor/.test(below) && !/finally/.test(below);
+    },
+  },
+  {
+    id: 'ASYNCIO_LOCK_NO_TIMEOUT',
+    category: 'Denial of Service',
+    description: 'asyncio.Lock acquire without timeout — can cause indefinite waiting under contention.',
+    severity: 'low',
+    fix_suggestion: 'Use asyncio.wait_for(lock.acquire(), timeout=10) to prevent indefinite blocking.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bawait\s+.*lock\.acquire\s*\(\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'CONCURRENT_FUTURES_USER_EXECUTOR',
+    category: 'Code Injection',
+    description: 'concurrent.futures executor with user-controlled function — code injection risk.',
+    severity: 'high',
+    fix_suggestion: 'Only submit pre-defined functions to the executor. Never use user input to select callables.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:executor|pool)\.submit\s*\(\s*(?:request\.|user_|getattr|globals|eval|input_)/.test(line) ||
+        /\b(?:executor|pool)\.map\s*\(\s*(?:request\.|user_|getattr|globals|eval)/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 86: Python Security Libraries Misuse (12 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'CRYPTOGRAPHY_UNSAFE_PARAMS',
+    category: 'Cryptography',
+    description: 'Python cryptography library with unsafe parameters (weak key size, no padding, etc.).',
+    severity: 'high',
+    fix_suggestion: 'Use recommended defaults: RSA key_size=2048+, AES with GCM mode, OAEP padding.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bgenerate_private_key\s*\([^)]*(?:key_size\s*=\s*(?:512|768|1024)\b)/.test(line) ||
+        /\bARC4\b|Blowfish\s*\(|TripleDES\s*\(|IDEA\s*\(|CAST5\s*\(/.test(line);
+    },
+  },
+  {
+    id: 'PYJWT_NO_ALGORITHM_VERIFY',
+    category: 'Authentication',
+    description: 'PyJWT decode without explicit algorithms — allows algorithm confusion attacks.',
+    severity: 'critical',
+    fix_suggestion: 'Always specify algorithms: jwt.decode(token, key, algorithms=["HS256"]).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\bjwt\.decode\s*\(/.test(line)) return false;
+      return !/algorithms\s*=/.test(line);
+    },
+  },
+  {
+    id: 'PASSLIB_DEPRECATED_SCHEME',
+    category: 'Cryptography',
+    description: 'passlib using deprecated hashing scheme (md5_crypt, des_crypt, etc.) — easily cracked.',
+    severity: 'high',
+    fix_suggestion: 'Use modern schemes: bcrypt, argon2, or pbkdf2_sha256 via passlib.hash.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bpasslib\.hash\.\s*(?:md5_crypt|des_crypt|sha1_crypt|mysql41|lmhash|nthash|ldap_md5)/.test(line) ||
+        /\bCryptContext\s*\([^)]*schemes\s*=\s*\[.*(?:md5_crypt|des_crypt|sha1_crypt)/.test(line);
+    },
+  },
+  {
+    id: 'ITSDANGEROUS_SHORT_SECRET',
+    category: 'Cryptography',
+    description: 'itsdangerous Signer with short or weak secret — signed tokens easily forged.',
+    severity: 'high',
+    fix_suggestion: 'Use a secret key of at least 32 random bytes. Generate with os.urandom(32).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:URLSafeTimedSerializer|Signer|URLSafeSerializer)\s*\(\s*['"][^'"]{1,15}['"]/.test(line);
+    },
+  },
+  {
+    id: 'AUTHLIB_NO_STATE_VALIDATION',
+    category: 'Authentication',
+    description: 'Authlib OAuth without state parameter validation — vulnerable to CSRF attacks.',
+    severity: 'high',
+    fix_suggestion: 'Always validate the state parameter in OAuth callback: client.authorize_access_token() validates state automatically.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bauthorize_redirect\b/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/state/.test(allContent) || /state\s*=\s*None/.test(allContent);
+    },
+  },
+  {
+    id: 'PYTHON_JOSE_NONE_ALGORITHM',
+    category: 'Authentication',
+    description: 'python-jose JWT with "none" algorithm allowed — tokens accepted without signature.',
+    severity: 'critical',
+    fix_suggestion: 'Never include "none" in allowed algorithms. Use: jwt.decode(token, key, algorithms=["HS256"]).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bjwt\.decode\s*\([^)]*algorithms\s*=\s*\[.*['"]none['"]/.test(line) ||
+        /\bjose\b.*\.decode\s*\([^)]*algorithms\s*=\s*\[.*['"]none['"]/.test(line);
+    },
+  },
+  {
+    id: 'BCRYPT_LOW_ROUNDS',
+    category: 'Cryptography',
+    description: 'bcrypt with low rounds (< 10) — significantly reduces brute-force resistance.',
+    severity: 'high',
+    fix_suggestion: 'Use bcrypt with at least 12 rounds: bcrypt.hashpw(password, bcrypt.gensalt(rounds=12)).',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bgensalt\s*\(\s*(?:rounds\s*=\s*)?[1-9]\s*\)/.test(line) &&
+        !/gensalt\s*\(\s*(?:rounds\s*=\s*)?(?:1[0-9]|[2-9][0-9])\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'FERNET_HARDCODED_KEY',
+    category: 'Cryptography',
+    description: 'Fernet encryption with hardcoded key — encryption can be trivially reversed.',
+    severity: 'critical',
+    fix_suggestion: 'Store Fernet keys in environment variables or key management services, not in source code.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bFernet\s*\(\s*b?['"][A-Za-z0-9+/=]{20,}['"]/.test(line);
+    },
+  },
+  {
+    id: 'RSA_SMALL_KEY_CRYPTOGRAPHY',
+    category: 'Cryptography',
+    description: 'RSA key generation with key size less than 2048 bits — vulnerable to factoring attacks.',
+    severity: 'high',
+    fix_suggestion: 'Use RSA key size of at least 2048 bits, preferably 4096: rsa.generate_private_key(key_size=4096).',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\brsa\.generate_private_key\s*\([^)]*key_size\s*=\s*(?:512|768|1024)\b/.test(line);
+    },
+  },
+  {
+    id: 'PARAMIKO_NO_HOST_KEY_VERIFY',
+    category: 'Transport Security',
+    description: 'Paramiko SSH without host key verification — vulnerable to MITM attacks.',
+    severity: 'high',
+    fix_suggestion: 'Use AutoAddPolicy only in development. In production, load known host keys.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bset_missing_host_key_policy\s*\(\s*(?:paramiko\.)?(?:AutoAddPolicy|WarningPolicy)\s*\(\s*\)/.test(line);
+    },
+  },
+  {
+    id: 'SSL_WEAK_PROTOCOL',
+    category: 'Transport Security',
+    description: 'SSL context with weak protocol version (SSLv2, SSLv3, TLSv1.0) — known vulnerabilities.',
+    severity: 'high',
+    fix_suggestion: 'Use ssl.PROTOCOL_TLS_CLIENT or ssl.TLSVersion.TLSv1_2 minimum.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bssl\.PROTOCOL_SSLv[23]\b/.test(line) ||
+        /\bssl\.PROTOCOL_TLSv1\b(?!_[12])/.test(line) ||
+        /\bSSLv2_METHOD\b|SSLv3_METHOD\b|TLSv1_METHOD\b/.test(line);
+    },
+  },
+  {
+    id: 'CERTIFI_CUSTOM_CA_BUNDLE',
+    category: 'Transport Security',
+    description: 'Custom CA bundle replacing certifi — may trust rogue certificates.',
+    severity: 'medium',
+    fix_suggestion: 'Use the default certifi CA bundle. Only add custom CAs when absolutely necessary with proper review.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bverify\s*=\s*['"]\//.test(line) && /\b(?:requests|httpx|urllib3)\b/.test(line) ||
+        /\bSSLContext\b.*\bload_verify_locations\s*\(/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 87: Python Data Processing (12 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'PANDAS_READ_CSV_USER_PATH',
+    category: 'Path Traversal',
+    description: 'pandas read_csv with user-controlled path — can read arbitrary files from the filesystem.',
+    severity: 'high',
+    fix_suggestion: 'Validate file paths against an allowlist of directories. Use os.path.realpath() for canonicalization.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bpd\.read_csv\s*\(\s*(?:request\.|user_|input_|file_path|filename|path\b|f['"`])/.test(line) ||
+        /\bread_csv\s*\(\s*(?:request\.|user_|input_|file_path|filename)/.test(line);
+    },
+  },
+  {
+    id: 'OPENPYXL_MACRO_ENABLED',
+    category: 'Code Execution',
+    description: 'openpyxl loading macro-enabled file (.xlsm) — macros may contain malicious code.',
+    severity: 'high',
+    fix_suggestion: 'Reject macro-enabled files (.xlsm, .xltm). Only accept .xlsx files.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bload_workbook\s*\([^)]*keep_vba\s*=\s*True/.test(line) ||
+        /\bload_workbook\s*\([^)]*\.xlsm/.test(line);
+    },
+  },
+  {
+    id: 'REPORTLAB_USER_CONTENT',
+    category: 'Injection',
+    description: 'reportlab PDF generation with user-controlled content — PDF injection risk.',
+    severity: 'medium',
+    fix_suggestion: 'Sanitize and escape user content before adding to PDF. Validate URLs and file paths.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bParagraph\s*\(\s*(?:request\.|user_|input_|f['"`])/.test(line) ||
+        /\bdrawString\s*\([^)]*(?:request\.|user_|input_|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'PIL_IMAGE_BOMB',
+    category: 'Denial of Service',
+    description: 'PIL/Pillow Image.open without decompression bomb protection — can exhaust memory.',
+    severity: 'high',
+    fix_suggestion: 'Set PIL.Image.MAX_IMAGE_PIXELS to a reasonable limit, or use Image.open with a size check.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bImage\.MAX_IMAGE_PIXELS\s*=\s*None/.test(line) ||
+        /\bImage\.MAX_IMAGE_PIXELS\s*=\s*0/.test(line) ||
+        /\bDecompressionBombWarning\b.*\bignore\b/.test(line);
+    },
+  },
+  {
+    id: 'CSV_READER_NO_FIELD_SIZE_LIMIT',
+    category: 'Denial of Service',
+    description: 'csv.reader without field size limit — malicious CSV can exhaust memory.',
+    severity: 'medium',
+    fix_suggestion: 'Set csv.field_size_limit(131072) before reading CSV files to prevent memory exhaustion.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\bcsv\.(?:reader|DictReader)\s*\(/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return !/field_size_limit/.test(allContent);
+    },
+  },
+  {
+    id: 'JSON_LOADS_NO_SIZE_LIMIT',
+    category: 'Denial of Service',
+    description: 'json.loads on untrusted input without size limit — may exhaust memory on large payloads.',
+    severity: 'medium',
+    fix_suggestion: 'Validate input size before parsing: if len(data) > MAX_SIZE: raise ValueError.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bjson\.loads\s*\(\s*(?:request\.(?:body|data|text)|body\b|raw_data|payload)/.test(line);
+    },
+  },
+  {
+    id: 'YAML_LOAD_UNSAFE_LOADER',
+    category: 'Code Execution',
+    description: 'yaml.load without SafeLoader — can execute arbitrary Python code.',
+    severity: 'critical',
+    fix_suggestion: 'Use yaml.safe_load() or yaml.load(data, Loader=yaml.SafeLoader).',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\byaml\.load\s*\(/.test(line)) return false;
+      return !/SafeLoader|safe_load|Loader\s*=\s*yaml\.SafeLoader|Loader\s*=\s*SafeLoader|BaseLoader|FullLoader/.test(line);
+    },
+  },
+  {
+    id: 'CONFIGPARSER_INTERPOLATION_INJECTION',
+    category: 'Injection',
+    description: 'ConfigParser with user-controlled values and interpolation enabled — format string injection.',
+    severity: 'medium',
+    fix_suggestion: 'Use RawConfigParser or set interpolation=None to disable format string processing.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bConfigParser\s*\(\s*\)/.test(line) && !/RawConfigParser/.test(line) ||
+        /\.set\s*\([^)]*(?:request\.|user_|input_)/.test(line) && /ConfigParser/.test(line);
+    },
+  },
+  {
+    id: 'SQLITE3_USER_DB_PATH',
+    category: 'Path Traversal',
+    description: 'sqlite3.connect with user-controlled database path — can access or create arbitrary database files.',
+    severity: 'high',
+    fix_suggestion: 'Validate database paths against an allowed directory. Never accept user input for database file paths.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bsqlite3\.connect\s*\(\s*(?:request\.|user_|input_|db_path|filename|f['"`]|path\b)/.test(line);
+    },
+  },
+  {
+    id: 'H5PY_UNTRUSTED_HDF5',
+    category: 'Code Execution',
+    description: 'h5py loading untrusted HDF5 files — can contain malicious data or trigger buffer overflows.',
+    severity: 'high',
+    fix_suggestion: 'Validate HDF5 files before loading. Run h5py operations in a sandboxed environment.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bh5py\.File\s*\(\s*(?:request\.|user_|input_|file_path|filename|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'PARQUET_USER_SCHEMA',
+    category: 'Data Injection',
+    description: 'Arrow/Parquet file loaded with user-controlled schema or path — data injection risk.',
+    severity: 'medium',
+    fix_suggestion: 'Validate Parquet file paths and enforce expected schemas before reading.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bpq\.read_table\s*\(\s*(?:request\.|user_|input_|file_path|f['"`])/.test(line) ||
+        /\bpd\.read_parquet\s*\(\s*(?:request\.|user_|input_|file_path|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'XLRD_FORMULA_EVAL',
+    category: 'Code Execution',
+    description: 'xlrd loading Excel file with formula evaluation — malicious formulas can execute commands.',
+    severity: 'high',
+    fix_suggestion: 'Use openpyxl with data_only=True instead of xlrd. Reject files with formulas from untrusted sources.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bxlrd\.open_workbook\s*\(\s*(?:request\.|user_|input_|file_path|filename|f['"`])/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 88: Python Web Scraping & Network (10 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'REQUESTS_NO_TIMEOUT',
+    category: 'Denial of Service',
+    description: 'Python requests library call without timeout — can hang indefinitely.',
+    severity: 'medium',
+    fix_suggestion: 'Always set timeout: requests.get(url, timeout=30).',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      if (!/\brequests\.(?:get|post|put|delete|patch|head|options)\s*\(/.test(line)) return false;
+      return !/timeout\s*=/.test(line);
+    },
+  },
+  {
+    id: 'URLLIB3_DISABLED_WARNINGS',
+    category: 'Transport Security',
+    description: 'urllib3 warnings disabled — suppresses critical TLS/SSL certificate warnings.',
+    severity: 'high',
+    fix_suggestion: 'Fix the underlying SSL issue instead of disabling warnings. Use proper certificates.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\burllib3\.disable_warnings\s*\(/.test(line) ||
+        /\bwarnings\.filterwarnings\s*\(\s*['"]ignore['"].*InsecureRequestWarning/.test(line);
+    },
+  },
+  {
+    id: 'SELENIUM_USER_URL',
+    category: 'SSRF',
+    description: 'Selenium WebDriver navigating to user-controlled URL — can access internal services.',
+    severity: 'high',
+    fix_suggestion: 'Validate URLs against an allowlist of permitted domains before navigation.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bdriver\.get\s*\(\s*(?:request\.|user_|input_|url\b|target_url|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'BEAUTIFULSOUP_LXML_UNTRUSTED_XML',
+    category: 'XML Injection',
+    description: 'BeautifulSoup with lxml parser on untrusted XML — vulnerable to XML external entity attacks.',
+    severity: 'high',
+    fix_suggestion: 'Use "html.parser" for untrusted HTML, or defusedxml for XML parsing.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bBeautifulSoup\s*\([^)]*['"](?:lxml-xml|xml)['"]/.test(line);
+    },
+  },
+  {
+    id: 'SCRAPY_USER_START_URLS',
+    category: 'SSRF',
+    description: 'Scrapy spider with user-controlled start_urls — can crawl arbitrary targets.',
+    severity: 'high',
+    fix_suggestion: 'Validate and restrict start_urls to an allowlist of permitted domains.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bstart_urls\s*=\s*\[?\s*(?:request\.|user_|input_|url\b|sys\.argv)/.test(line) ||
+        /\bstart_requests\b.*\b(?:request\.|user_|input_)/.test(line);
+    },
+  },
+  {
+    id: 'PARAMIKO_EXEC_USER_INPUT',
+    category: 'Command Injection',
+    description: 'Paramiko exec_command with user-controlled input — remote command injection.',
+    severity: 'critical',
+    fix_suggestion: 'Use shlex.quote() to escape arguments, or use a fixed command allowlist.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bexec_command\s*\(\s*(?:f['"`]|cmd|command|user_|input_|request\.)/.test(line);
+    },
+  },
+  {
+    id: 'FTPLIB_NO_TLS',
+    category: 'Transport Security',
+    description: 'ftplib FTP connection without TLS — credentials and data transmitted in plaintext.',
+    severity: 'high',
+    fix_suggestion: 'Use ftplib.FTP_TLS instead of FTP for encrypted file transfers.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bftplib\.FTP\s*\(/.test(line) && !/FTP_TLS/.test(line);
+    },
+  },
+  {
+    id: 'SOCKET_BIND_ALL_INTERFACES',
+    category: 'Network Security',
+    description: 'Socket bound to 0.0.0.0 — listens on all network interfaces, exposing the service externally.',
+    severity: 'medium',
+    fix_suggestion: 'Bind to 127.0.0.1 for local-only services, or use a specific interface address.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\.bind\s*\(\s*\(\s*['"]0\.0\.0\.0['"]/.test(line) ||
+        /\.bind\s*\(\s*\(\s*['"]["']\s*,/.test(line);
+    },
+  },
+  {
+    id: 'HTTPLIB2_NO_CERT_VERIFY',
+    category: 'Transport Security',
+    description: 'httplib2 with certificate verification disabled — vulnerable to MITM attacks.',
+    severity: 'high',
+    fix_suggestion: 'Remove disable_ssl_certificate_validation=True. Always verify SSL certificates.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bhttplib2\.Http\s*\([^)]*disable_ssl_certificate_validation\s*=\s*True/.test(line);
+    },
+  },
+  {
+    id: 'DNS_RESOLVER_USER_QUERY',
+    category: 'SSRF',
+    description: 'DNS resolver with user-controlled query — can probe internal network infrastructure.',
+    severity: 'medium',
+    fix_suggestion: 'Validate and sanitize domain names. Restrict queries to public domains only.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bresolver\.(?:resolve|query)\s*\(\s*(?:request\.|user_|input_|domain|hostname|f['"`])/.test(line);
+    },
+  },
+
+  // ════════════════════════════════════════════
+  // Cycle 89: Python Testing & DevOps (10 rules)
+  // ════════════════════════════════════════════
+
+  {
+    id: 'PYTEST_FIXTURE_REAL_CREDS',
+    category: 'Secrets',
+    description: 'pytest fixture with hardcoded credentials — secrets may leak via test output or CI logs.',
+    severity: 'high',
+    fix_suggestion: 'Use environment variables or a .env file for test credentials. Never hardcode secrets in tests.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: false,
+    skipTestFiles: false,
+    detect: (line, ctx) => {
+      if (!/\b(?:password|secret|api_key|token)\s*=\s*['"][^'"]{8,}['"]/.test(line)) return false;
+      const allContent = ctx.fileContent;
+      return /@pytest\.fixture\b/.test(allContent) || /\bdef\s+\w+\s*\(\s*\)\s*:\s*$/.test(line);
+    },
+  },
+  {
+    id: 'UNITTEST_MOCK_SIDE_EFFECT_EXEC',
+    category: 'Code Execution',
+    description: 'unittest.mock patch with side_effect executing user-controlled code — test RCE risk.',
+    severity: 'medium',
+    fix_suggestion: 'Only use static return values or pre-defined functions as side_effect in mocks.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: false,
+    detect: (line) => {
+      return /\bside_effect\s*=\s*(?:eval|exec|compile|os\.system|subprocess)/.test(line);
+    },
+  },
+  {
+    id: 'FABRIC_INVOKE_USER_CMD',
+    category: 'Command Injection',
+    description: 'Fabric/Invoke run with user-controlled command — remote command injection.',
+    severity: 'critical',
+    fix_suggestion: 'Use a command allowlist and shlex.quote() for any arguments.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\b(?:c\.run|ctx\.run|conn\.run|connection\.run)\s*\(\s*(?:f['"`]|cmd|command|user_|input_|request\.)/.test(line)) return false;
+      return /\b(?:fabric|invoke|Connection|Context)\b/.test(ctx.fileContent);
+    },
+  },
+  {
+    id: 'ANSIBLE_RAW_MODULE',
+    category: 'Command Injection',
+    description: 'Ansible playbook using raw or shell module with user input — command injection risk.',
+    severity: 'high',
+    fix_suggestion: 'Use the command module with argv list, or use specialized Ansible modules instead of shell/raw.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bmodule\s*=\s*['"](?:raw|shell)['"]/.test(line) && /\b(?:args|cmd)\s*=.*(?:\{\{|user_|input_|request\.)/.test(line) ||
+        /\bansible_runner\.run\s*\([^)]*(?:module\s*=\s*['"](?:raw|shell)['"])/.test(line);
+    },
+  },
+  {
+    id: 'BOTO3_NO_REGION_VALIDATION',
+    category: 'Security Configuration',
+    description: 'boto3 client with user-controlled region — can redirect requests to attacker-controlled endpoints.',
+    severity: 'medium',
+    fix_suggestion: 'Validate region names against a fixed allowlist of expected AWS regions.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bboto3\.client\s*\([^)]*region_name\s*=\s*(?:request\.|user_|input_|region\b|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'DOCKER_PY_USER_IMAGE',
+    category: 'Code Execution',
+    description: 'docker-py running container with user-controlled image — can execute arbitrary containers.',
+    severity: 'critical',
+    fix_suggestion: 'Only allow images from a trusted registry allowlist. Pin images by digest.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:client|docker)\.containers\.run\s*\(\s*(?:request\.|user_|input_|image_name|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'K8S_CLIENT_USER_NAMESPACE',
+    category: 'Authorization',
+    description: 'Kubernetes client with user-controlled namespace — can access resources in other namespaces.',
+    severity: 'high',
+    fix_suggestion: 'Validate namespace against an allowlist of permitted namespaces.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\b(?:v1|apps_v1|batch_v1)\.(?:list|create|delete|patch)_namespaced_\w+\s*\([^)]*namespace\s*=\s*(?:request\.|user_|input_|ns\b|f['"`])/.test(line);
+    },
+  },
+  {
+    id: 'CELERY_TASK_USER_ARGS',
+    category: 'Code Injection',
+    description: 'Celery task dispatched with user-controlled task name or args — arbitrary code execution risk.',
+    severity: 'critical',
+    fix_suggestion: 'Use a fixed allowlist of task names. Never let users specify which Celery task to execute.',
+    auto_fixable: false,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line) => {
+      return /\bapp\.send_task\s*\(\s*(?:request\.|user_|input_|task_name|f['"`])/.test(line) ||
+        /\bcelery_app\.send_task\s*\(\s*(?:request\.|user_|input_|task_name)/.test(line);
+    },
+  },
+  {
+    id: 'GUNICORN_DEBUG_MODE',
+    category: 'Security Configuration',
+    description: 'Gunicorn running with debug mode enabled — exposes debugging information in production.',
+    severity: 'high',
+    fix_suggestion: 'Remove --log-level debug and --reload flags in production. Set loglevel to "info" or "warning".',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (/\bloglevel\s*=\s*['"]debug['"]/.test(line)) {
+        return /gunicorn/.test(ctx.fileContent) || /gunicorn/.test(ctx.filePath);
+      }
+      return /\bgunicorn\b.*\breload\s*=\s*True/.test(line);
+    },
+  },
+  {
+    id: 'UVICORN_RELOAD_PRODUCTION',
+    category: 'Security Configuration',
+    description: 'Uvicorn with reload=True in production — enables file watching and auto-restart, not safe for production.',
+    severity: 'high',
+    fix_suggestion: 'Remove reload=True for production deployments. Use reload only in development.',
+    auto_fixable: true,
+    fileTypes: ['.py'],
+    skipCommentsAndStrings: true,
+    skipTestFiles: true,
+    detect: (line, ctx) => {
+      if (!/\buvicorn\.run\s*\(/.test(line)) return false;
+      return /reload\s*=\s*True/.test(line);
+    },
+  },
 ];
 
 // ── File Discovery ──

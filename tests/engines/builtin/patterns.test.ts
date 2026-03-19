@@ -1820,3 +1820,1295 @@ describe('Cycle 70: False Positive Hardening', () => {
     expect(hasRule(findings, 'PBKDF2_LOW_ITERATION_COUNT')).toBe(false);
   });
 });
+
+// ════════════════════════════════════════════
+// Cycle 81: Django ORM & Models Deep
+// ════════════════════════════════════════════
+
+describe('Cycle 81: Django ORM & Models Deep', () => {
+  it('catches QuerySet.extra() with user input in select', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.all().extra(select={'val': request.GET['field']})`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_QUERYSET_EXTRA_SQL')).toBe(true);
+  });
+
+  it('does NOT flag QuerySet.extra() with static values', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.all().extra(select={'is_recent': "created_at > NOW() - INTERVAL '7 days'"})`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_QUERYSET_EXTRA_SQL')).toBe(false);
+  });
+
+  it('catches annotate() with RawSQL f-string', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.annotate(val=RawSQL(f"SELECT {col} FROM table"))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_ANNOTATE_RAWSQL_INJECT')).toBe(true);
+  });
+
+  it('does NOT flag annotate() with RawSQL using params', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.annotate(val=RawSQL("SELECT col FROM t WHERE id = %s", [pk]))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_ANNOTATE_RAWSQL_INJECT')).toBe(false);
+  });
+
+  it('catches F() expression with user input', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.filter(val=F(request.GET['field']))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_F_EXPRESSION_USER_STRING')).toBe(true);
+  });
+
+  it('does NOT flag F() with static field name', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.filter(val=F('other_field'))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_F_EXPRESSION_USER_STRING')).toBe(false);
+  });
+
+  it('catches Subquery with RawSQL f-string', async () => {
+    const findings = await scanCode(
+      `sub = Subquery(RawSQL(f"SELECT id FROM {table_name}"))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_SUBQUERY_RAW_SQL')).toBe(true);
+  });
+
+  it('catches .only() exposing password field', async () => {
+    const findings = await scanCode(
+      `users = User.objects.only('username', 'password', 'email')`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_DEFER_SENSITIVE_FIELDS')).toBe(true);
+  });
+
+  it('catches order_by with user-controlled field', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.order_by(request.GET['sort'])`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_META_ORDERING_USER_INPUT')).toBe(true);
+  });
+
+  it('does NOT flag order_by with static field', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.order_by('-created_at')`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_META_ORDERING_USER_INPUT')).toBe(false);
+  });
+
+  it('catches CharField without max_length', async () => {
+    const findings = await scanCode(
+      `name = models.CharField()`,
+      'models.py',
+    );
+    expect(hasRule(findings, 'DJANGO_CHARFIELD_NO_MAX_LENGTH')).toBe(true);
+  });
+
+  it('does NOT flag CharField with max_length', async () => {
+    const findings = await scanCode(
+      `name = models.CharField(max_length=255)`,
+      'models.py',
+    );
+    expect(hasRule(findings, 'DJANGO_CHARFIELD_NO_MAX_LENGTH')).toBe(false);
+  });
+
+  it('catches FileField without upload_to', async () => {
+    const findings = await scanCode(
+      `document = models.FileField()`,
+      'models.py',
+    );
+    expect(hasRule(findings, 'DJANGO_FILEFIELD_NO_VALIDATION')).toBe(true);
+  });
+
+  it('catches .filter() with unpacked user kwargs', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.filter(**request.GET.dict())`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_JSONFIELD_USER_PATH')).toBe(true);
+  });
+
+  it('catches GenericForeignKey without limit_choices_to', async () => {
+    const findings = await scanCode(
+      `content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)\nobject_id = models.PositiveIntegerField()\ncontent_object = GenericForeignKey('content_type', 'object_id')`,
+      'models.py',
+    );
+    expect(hasRule(findings, 'DJANGO_GENERIC_FK_NO_VALIDATION')).toBe(true);
+  });
+
+  it('catches bulk_create without ignore_conflicts', async () => {
+    const findings = await scanCode(
+      `MyModel.objects.bulk_create(objects_list)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_BULK_CREATE_NO_UNIQUE')).toBe(true);
+  });
+
+  it('does NOT flag bulk_create with ignore_conflicts', async () => {
+    const findings = await scanCode(
+      `MyModel.objects.bulk_create(objects_list, ignore_conflicts=True)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_BULK_CREATE_NO_UNIQUE')).toBe(false);
+  });
+
+  it('catches update_or_create without transaction', async () => {
+    const findings = await scanCode(
+      `obj, created = MyModel.objects.update_or_create(name=name, defaults={'value': value})`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_UPDATE_OR_CREATE_RACE')).toBe(true);
+  });
+
+  it('catches select_for_update without timeout', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.select_for_update().get(pk=pk)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_SELECT_FOR_UPDATE_NO_TIMEOUT')).toBe(true);
+  });
+
+  it('does NOT flag select_for_update with nowait', async () => {
+    const findings = await scanCode(
+      `qs = MyModel.objects.select_for_update(nowait=True).get(pk=pk)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_SELECT_FOR_UPDATE_NO_TIMEOUT')).toBe(false);
+  });
+
+  it('catches aggregate with user-controlled field name', async () => {
+    const findings = await scanCode(
+      `result = MyModel.objects.aggregate(total=Sum(request.GET['agg_field']))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_AGGREGATE_USER_FIELD')).toBe(true);
+  });
+
+  it('catches values_list exposing password field', async () => {
+    const findings = await scanCode(
+      `data = User.objects.values_list('username', 'password', flat=False)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_VALUES_LIST_SENSITIVE')).toBe(true);
+  });
+
+  it('does NOT flag values_list with safe fields', async () => {
+    const findings = await scanCode(
+      `data = User.objects.values_list('username', 'email', flat=False)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_VALUES_LIST_SENSITIVE')).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 82: Django Views & Forms
+// ════════════════════════════════════════════
+
+describe('Cycle 82: Django Views & Forms', () => {
+  it('catches FormView with csrf_exempt', async () => {
+    const findings = await scanCode(
+      `@csrf_exempt\n@method_decorator(csrf_exempt)\nclass MyFormView(FormView):\n    form_class = MyForm`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_FORMVIEW_NO_CSRF')).toBe(true);
+  });
+
+  it('does NOT flag FormView without csrf_exempt', async () => {
+    const findings = await scanCode(
+      `class MyFormView(FormView):\n    form_class = MyForm\n    template_name = 'form.html'`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_FORMVIEW_NO_CSRF')).toBe(false);
+  });
+
+  it('catches ModelForm with exclude', async () => {
+    const findings = await scanCode(
+      `class UserForm(ModelForm):\n    class Meta:\n        model = User\n        exclude = ['is_staff']`,
+      'forms.py',
+    );
+    expect(hasRule(findings, 'DJANGO_MODELFORM_EXCLUDE')).toBe(true);
+  });
+
+  it('catches StreamingHttpResponse with user content', async () => {
+    const findings = await scanCode(
+      `return StreamingHttpResponse(request.body)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_STREAMING_USER_CONTENT')).toBe(true);
+  });
+
+  it('catches HttpResponse with user content_type', async () => {
+    const findings = await scanCode(
+      `return HttpResponse(data, content_type=request.GET['type'])`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_RESPONSE_USER_CONTENT_TYPE')).toBe(true);
+  });
+
+  it('does NOT flag HttpResponse with static content_type', async () => {
+    const findings = await scanCode(
+      `return HttpResponse(data, content_type='application/json')`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_RESPONSE_USER_CONTENT_TYPE')).toBe(false);
+  });
+
+  it('catches redirect with user URL from GET', async () => {
+    const findings = await scanCode(
+      `return redirect(request.GET.get('next', '/'))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_REDIRECT_USER_URL')).toBe(true);
+  });
+
+  it('does NOT flag redirect with static URL', async () => {
+    const findings = await scanCode(
+      `return redirect('/dashboard/')`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_REDIRECT_USER_URL')).toBe(false);
+  });
+
+  it('catches LoginView without rate limit', async () => {
+    const findings = await scanCode(
+      `from django.contrib.auth.views import LoginView\nclass MyLogin(LoginView):\n    template_name = 'login.html'`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_LOGINVIEW_NO_RATE_LIMIT')).toBe(true);
+  });
+
+  it('catches admin site without 2FA', async () => {
+    const findings = await scanCode(
+      `from django.contrib import admin\nurlpatterns = [path('admin/', admin.site.urls)]`,
+      'urls.py',
+    );
+    expect(hasRule(findings, 'DJANGO_ADMIN_NO_2FA')).toBe(true);
+  });
+
+  it('catches permission_required without login_url', async () => {
+    const findings = await scanCode(
+      `@permission_required('app.can_edit')`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_PERMISSION_NO_LOGIN_URL')).toBe(true);
+  });
+
+  it('does NOT flag permission_required with login_url', async () => {
+    const findings = await scanCode(
+      `@permission_required('app.can_edit', login_url='/accounts/login/')`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_PERMISSION_NO_LOGIN_URL')).toBe(false);
+  });
+
+  it('catches cache_page on authenticated view', async () => {
+    const findings = await scanCode(
+      `@cache_page(60 * 15)\n@login_required\ndef profile_view(request):`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_CACHE_PAGE_AUTHENTICATED')).toBe(true);
+  });
+
+  it('catches JsonResponse with __dict__', async () => {
+    const findings = await scanCode(
+      `return JsonResponse(user.__dict__)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_JSONRESPONSE_MODEL_INSTANCE')).toBe(true);
+  });
+
+  it('does NOT flag JsonResponse with explicit dict', async () => {
+    const findings = await scanCode(
+      `return JsonResponse({'name': user.name, 'email': user.email})`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_JSONRESPONSE_MODEL_INSTANCE')).toBe(false);
+  });
+
+  it('catches request.FILES without type check', async () => {
+    const findings = await scanCode(
+      `uploaded = request.FILES['document']\nobj.file = uploaded\nobj.save()`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_SIMPLE_UPLOADED_NO_TYPE_CHECK')).toBe(true);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 83: Flask Deep
+// ════════════════════════════════════════════
+
+describe('Cycle 83: Flask Deep', () => {
+  it('catches Blueprint without auth', async () => {
+    const findings = await scanCode(
+      `from flask import Blueprint\napi_bp = Blueprint('api', __name__)\n@api_bp.route('/data')\ndef get_data():\n    return jsonify(data)`,
+      'routes.py',
+    );
+    expect(hasRule(findings, 'FLASK_BLUEPRINT_NO_AUTH')).toBe(true);
+  });
+
+  it('does NOT flag Blueprint with login_required', async () => {
+    const findings = await scanCode(
+      `from flask import Blueprint\nfrom flask_login import login_required\napi_bp = Blueprint('api', __name__)\n@api_bp.route('/data')\n@login_required\ndef get_data():\n    return jsonify(data)`,
+      'routes.py',
+    );
+    expect(hasRule(findings, 'FLASK_BLUEPRINT_NO_AUTH')).toBe(false);
+  });
+
+  it('catches Flask-Login without session_protection', async () => {
+    const findings = await scanCode(
+      `from flask_login import LoginManager\nlogin_manager = LoginManager(app)`,
+      'app.py',
+    );
+    expect(hasRule(findings, 'FLASK_LOGIN_NO_SESSION_PROTECTION')).toBe(true);
+  });
+
+  it('catches Flask-WTF CSRF disabled', async () => {
+    const findings = await scanCode(
+      `app.config['WTF_CSRF_ENABLED'] = False`,
+      'config.py',
+    );
+    expect(hasRule(findings, 'FLASK_WTF_CSRF_DISABLED')).toBe(true);
+  });
+
+  it('catches Flask-SQLAlchemy raw SQL f-string', async () => {
+    const findings = await scanCode(
+      `result = db.session.execute(f"SELECT * FROM users WHERE name = '{name}'")`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'FLASK_SQLALCHEMY_RAW_SQL')).toBe(true);
+  });
+
+  it('does NOT flag Flask-SQLAlchemy with text() and params', async () => {
+    const findings = await scanCode(
+      `result = db.session.execute(text("SELECT * FROM users WHERE name = :name"), {"name": name})`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'FLASK_SQLALCHEMY_RAW_SQL')).toBe(false);
+  });
+
+  it('catches Flask-Mail without TLS', async () => {
+    const findings = await scanCode(
+      `MAIL_USE_TLS = False`,
+      'config.py',
+    );
+    expect(hasRule(findings, 'FLASK_MAIL_NO_TLS')).toBe(true);
+  });
+
+  it('catches Flask-CORS credentials with wildcard', async () => {
+    const findings = await scanCode(
+      `CORS(app, origins="*", supports_credentials=True)`,
+      'app.py',
+    );
+    expect(hasRule(findings, 'FLASK_CORS_CREDENTIALS_WILDCARD')).toBe(true);
+  });
+
+  it('does NOT flag Flask-CORS with specific origin', async () => {
+    const findings = await scanCode(
+      `CORS(app, origins="https://example.com", supports_credentials=True)`,
+      'app.py',
+    );
+    expect(hasRule(findings, 'FLASK_CORS_CREDENTIALS_WILDCARD')).toBe(false);
+  });
+
+  it('catches send_from_directory with user path', async () => {
+    const findings = await scanCode(
+      `return send_from_directory(upload_dir, request.args.get('filename'))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'FLASK_SEND_FROM_DIR_USER_SUBPATH')).toBe(true);
+  });
+
+  it('catches Flask-Limiter without default_limits', async () => {
+    const findings = await scanCode(
+      `from flask_limiter import Limiter\nlimiter = Limiter(app, key_func=get_remote_address)`,
+      'app.py',
+    );
+    expect(hasRule(findings, 'FLASK_LIMITER_NOT_GLOBAL')).toBe(true);
+  });
+
+  it('catches Flask errorhandler exposing traceback', async () => {
+    const findings = await scanCode(
+      `@app.errorhandler(500)\ndef handle_500(e):\n    return jsonify(error=str(e), trace=traceback.format_exc()), 500`,
+      'app.py',
+    );
+    expect(hasRule(findings, 'FLASK_ERRORHANDLER_TRACEBACK')).toBe(true);
+  });
+
+  it('catches Flask-Session filesystem backend', async () => {
+    const findings = await scanCode(
+      `SESSION_TYPE = 'filesystem'`,
+      'config.py',
+    );
+    expect(hasRule(findings, 'FLASK_SESSION_FILESYSTEM_BACKEND')).toBe(true);
+  });
+
+  it('does NOT flag Flask-Session with redis backend', async () => {
+    const findings = await scanCode(
+      `SESSION_TYPE = 'redis'`,
+      'config.py',
+    );
+    expect(hasRule(findings, 'FLASK_SESSION_FILESYSTEM_BACKEND')).toBe(false);
+  });
+
+  it('catches Flask-Migrate with user-controlled revision', async () => {
+    const findings = await scanCode(
+      `upgrade(request.args.get('revision'))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'FLASK_MIGRATE_USER_REVISION')).toBe(true);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 84: FastAPI & Pydantic Deep
+// ════════════════════════════════════════════
+
+describe('Cycle 84: FastAPI & Pydantic Deep', () => {
+  it('catches FastAPI without middleware stack', async () => {
+    const findings = await scanCode(
+      `from fastapi import FastAPI\napp = FastAPI()`,
+      'main.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_NO_MIDDLEWARE_STACK')).toBe(true);
+  });
+
+  it('does NOT flag FastAPI with TrustedHostMiddleware', async () => {
+    const findings = await scanCode(
+      `from fastapi import FastAPI\nfrom starlette.middleware.trustedhost import TrustedHostMiddleware\napp = FastAPI()\napp.add_middleware(TrustedHostMiddleware, allowed_hosts=["example.com"])\napp.add_middleware(HTTPSRedirectMiddleware)`,
+      'main.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_NO_MIDDLEWARE_STACK')).toBe(false);
+  });
+
+  it('catches Pydantic model without validators for email', async () => {
+    const findings = await scanCode(
+      `class UserCreate(BaseModel):\n    email: str\n    password: str\n    name: str`,
+      'schemas.py',
+    );
+    expect(hasRule(findings, 'PYDANTIC_MODEL_NO_VALIDATORS')).toBe(true);
+  });
+
+  it('catches FastAPI BackgroundTask with user function', async () => {
+    const findings = await scanCode(
+      `background_tasks.add_task(getattr(module, request.query_params['func']))`,
+      'routes.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_BACKGROUND_TASK_USER_FUNC')).toBe(true);
+  });
+
+  it('catches SQLModel with raw SQL f-string', async () => {
+    const findings = await scanCode(
+      `result = session.exec(f"SELECT * FROM users WHERE id = {user_id}")`,
+      'crud.py',
+    );
+    expect(hasRule(findings, 'SQLMODEL_RAW_SQL')).toBe(true);
+  });
+
+  it('does NOT flag SQLModel with proper query', async () => {
+    const findings = await scanCode(
+      `result = session.exec(select(User).where(User.id == user_id))`,
+      'crud.py',
+    );
+    expect(hasRule(findings, 'SQLMODEL_RAW_SQL')).toBe(false);
+  });
+
+  it('catches FastAPI WebSocket without auth', async () => {
+    const findings = await scanCode(
+      `@app.websocket("/ws")\nasync def websocket_endpoint(websocket: WebSocket):\n    await websocket.accept()\n    data = await websocket.receive_text()`,
+      'main.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_WEBSOCKET_NO_AUTH')).toBe(true);
+  });
+
+  it('catches Pydantic arbitrary_types_allowed', async () => {
+    const findings = await scanCode(
+      `class Config:\n    arbitrary_types_allowed = True`,
+      'schemas.py',
+    );
+    expect(hasRule(findings, 'PYDANTIC_ARBITRARY_TYPES')).toBe(true);
+  });
+
+  it('catches FastAPI mount with f-string path', async () => {
+    const findings = await scanCode(
+      `app.mount(f"/api/{version}", sub_app)`,
+      'main.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_MOUNT_NO_PATH_VALIDATION')).toBe(true);
+  });
+
+  it('does NOT flag FastAPI mount with static path', async () => {
+    const findings = await scanCode(
+      `app.mount("/static", StaticFiles(directory="static"))`,
+      'main.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_MOUNT_NO_PATH_VALIDATION')).toBe(false);
+  });
+
+  it('catches FastAPI Response with user headers', async () => {
+    const findings = await scanCode(
+      `return Response(content=data, headers=request.headers)`,
+      'routes.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_RESPONSE_USER_HEADERS')).toBe(true);
+  });
+
+  it('catches Starlette middleware without exception handling', async () => {
+    const findings = await scanCode(
+      `class MyMiddleware(BaseHTTPMiddleware):\n    async def dispatch(self, request, call_next):\n        response = await call_next(request)\n        return response`,
+      'middleware.py',
+    );
+    expect(hasRule(findings, 'STARLETTE_MIDDLEWARE_NO_EXCEPTION')).toBe(true);
+  });
+
+  it('catches uvicorn with reload in production', async () => {
+    const findings = await scanCode(
+      `uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)`,
+      'main.py',
+    );
+    expect(hasRule(findings, 'UVICORN_RELOAD_PRODUCTION')).toBe(true);
+  });
+
+  it('does NOT flag uvicorn without reload', async () => {
+    const findings = await scanCode(
+      `uvicorn.run("app:app", host="0.0.0.0", port=8000, workers=4)`,
+      'main.py',
+    );
+    expect(hasRule(findings, 'UVICORN_RELOAD_PRODUCTION')).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 85: Python Async Deep
+// ════════════════════════════════════════════
+
+describe('Cycle 85: Python Async Deep', () => {
+  it('catches asyncio create_subprocess_shell with user cmd', async () => {
+    const findings = await scanCode(
+      `proc = await asyncio.create_subprocess_shell(f"ls {user_dir}")`,
+      'utils.py',
+    );
+    expect(hasRule(findings, 'ASYNCIO_SUBPROCESS_SHELL_TRUE')).toBe(true);
+  });
+
+  it('does NOT flag create_subprocess_exec', async () => {
+    const findings = await scanCode(
+      `proc = await asyncio.create_subprocess_exec("ls", "-la", "/tmp")`,
+      'utils.py',
+    );
+    expect(hasRule(findings, 'ASYNCIO_SUBPROCESS_SHELL_TRUE')).toBe(false);
+  });
+
+  it('catches aiofiles.open with user path', async () => {
+    const findings = await scanCode(
+      `async with aiofiles.open(request.args['path']) as f:`,
+      'handlers.py',
+    );
+    expect(hasRule(findings, 'AIOFILES_USER_PATH')).toBe(true);
+  });
+
+  it('catches asyncpg fetch with f-string', async () => {
+    const findings = await scanCode(
+      `rows = await conn.fetch(f"SELECT * FROM users WHERE name = '{name}'")`,
+      'db.py',
+    );
+    expect(hasRule(findings, 'ASYNCPG_UNSAFE_QUERY')).toBe(true);
+  });
+
+  it('does NOT flag asyncpg with parameterized query', async () => {
+    const findings = await scanCode(
+      `rows = await conn.fetch("SELECT * FROM users WHERE name = $1", name)`,
+      'db.py',
+    );
+    expect(hasRule(findings, 'ASYNCPG_UNSAFE_QUERY')).toBe(false);
+  });
+
+  it('catches aioredis with user key f-string', async () => {
+    const findings = await scanCode(
+      `val = await redis.get(f"session:{user_input}")`,
+      'cache.py',
+    );
+    expect(hasRule(findings, 'AIOREDIS_USER_KEY')).toBe(true);
+  });
+
+  it('catches trio.open_tcp_stream without TLS', async () => {
+    const findings = await scanCode(
+      `stream = await trio.open_tcp_stream("api.example.com", 80)\nawait stream.send_all(data)`,
+      'client.py',
+    );
+    expect(hasRule(findings, 'TRIO_TCP_NO_TLS')).toBe(true);
+  });
+
+  it('catches aiohttp ClientSession without timeout', async () => {
+    const findings = await scanCode(
+      `async with aiohttp.ClientSession() as session:`,
+      'client.py',
+    );
+    expect(hasRule(findings, 'AIOHTTP_SESSION_NO_TIMEOUT')).toBe(true);
+  });
+
+  it('does NOT flag aiohttp ClientSession with timeout', async () => {
+    const findings = await scanCode(
+      `async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:`,
+      'client.py',
+    );
+    expect(hasRule(findings, 'AIOHTTP_SESSION_NO_TIMEOUT')).toBe(false);
+  });
+
+  it('catches asyncio Lock acquire without timeout', async () => {
+    const findings = await scanCode(
+      `await lock.acquire()`,
+      'workers.py',
+    );
+    expect(hasRule(findings, 'ASYNCIO_LOCK_NO_TIMEOUT')).toBe(true);
+  });
+
+  it('catches concurrent.futures submit with user function', async () => {
+    const findings = await scanCode(
+      `executor.submit(getattr(module, user_input), *args)`,
+      'workers.py',
+    );
+    expect(hasRule(findings, 'CONCURRENT_FUTURES_USER_EXECUTOR')).toBe(true);
+  });
+
+  it('does NOT flag concurrent.futures submit with static function', async () => {
+    const findings = await scanCode(
+      `executor.submit(process_data, item)`,
+      'workers.py',
+    );
+    expect(hasRule(findings, 'CONCURRENT_FUTURES_USER_EXECUTOR')).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 86: Python Security Libraries Misuse
+// ════════════════════════════════════════════
+
+describe('Cycle 86: Python Security Libraries Misuse', () => {
+  it('catches RSA with 1024-bit key', async () => {
+    const findings = await scanCode(
+      `key = rsa.generate_private_key(public_exponent=65537, key_size=1024)`,
+      'crypto.py',
+    );
+    expect(hasRule(findings, 'CRYPTOGRAPHY_UNSAFE_PARAMS')).toBe(true);
+  });
+
+  it('does NOT flag RSA with 4096-bit key', async () => {
+    const findings = await scanCode(
+      `key = rsa.generate_private_key(public_exponent=65537, key_size=4096)`,
+      'crypto.py',
+    );
+    expect(hasRule(findings, 'CRYPTOGRAPHY_UNSAFE_PARAMS')).toBe(false);
+  });
+
+  it('catches PyJWT decode without algorithms', async () => {
+    const findings = await scanCode(
+      `payload = jwt.decode(token, SECRET_KEY)`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'PYJWT_NO_ALGORITHM_VERIFY')).toBe(true);
+  });
+
+  it('does NOT flag PyJWT decode with algorithms', async () => {
+    const findings = await scanCode(
+      `payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'PYJWT_NO_ALGORITHM_VERIFY')).toBe(false);
+  });
+
+  it('catches passlib with md5_crypt', async () => {
+    const findings = await scanCode(
+      `hashed = passlib.hash.md5_crypt.hash(password)`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'PASSLIB_DEPRECATED_SCHEME')).toBe(true);
+  });
+
+  it('catches itsdangerous with short secret', async () => {
+    const findings = await scanCode(
+      `s = URLSafeTimedSerializer('mysecret')`,
+      'tokens.py',
+    );
+    expect(hasRule(findings, 'ITSDANGEROUS_SHORT_SECRET')).toBe(true);
+  });
+
+  it('does NOT flag itsdangerous with long secret', async () => {
+    const findings = await scanCode(
+      `s = URLSafeTimedSerializer(os.environ['SECRET_KEY'])`,
+      'tokens.py',
+    );
+    expect(hasRule(findings, 'ITSDANGEROUS_SHORT_SECRET')).toBe(false);
+  });
+
+  it('catches python-jose with none algorithm', async () => {
+    const findings = await scanCode(
+      `payload = jwt.decode(token, key, algorithms=["none", "HS256"])`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'PYTHON_JOSE_NONE_ALGORITHM')).toBe(true);
+  });
+
+  it('catches bcrypt with low rounds', async () => {
+    const findings = await scanCode(
+      `salt = bcrypt.gensalt(rounds=4)`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'BCRYPT_LOW_ROUNDS')).toBe(true);
+  });
+
+  it('does NOT flag bcrypt with 12 rounds', async () => {
+    const findings = await scanCode(
+      `salt = bcrypt.gensalt(rounds=12)`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'BCRYPT_LOW_ROUNDS')).toBe(false);
+  });
+
+  it('catches Fernet with hardcoded key', async () => {
+    const findings = await scanCode(
+      `f = Fernet(b'ZmRmZHNhZnNkYWZkc2FmZHNhZnNkYWY=')`,
+      'crypto.py',
+    );
+    expect(hasRule(findings, 'FERNET_HARDCODED_KEY')).toBe(true);
+  });
+
+  it('catches Paramiko AutoAddPolicy', async () => {
+    const findings = await scanCode(
+      `client.set_missing_host_key_policy(paramiko.AutoAddPolicy())`,
+      'ssh.py',
+    );
+    expect(hasRule(findings, 'PARAMIKO_NO_HOST_KEY_VERIFY')).toBe(true);
+  });
+
+  it('catches SSL with weak protocol', async () => {
+    const findings = await scanCode(
+      `ctx = ssl.SSLContext(ssl.PROTOCOL_SSLv3)`,
+      'server.py',
+    );
+    expect(hasRule(findings, 'SSL_WEAK_PROTOCOL')).toBe(true);
+  });
+
+  it('does NOT flag SSL with TLS client', async () => {
+    const findings = await scanCode(
+      `ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)`,
+      'server.py',
+    );
+    expect(hasRule(findings, 'SSL_WEAK_PROTOCOL')).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 87: Python Data Processing
+// ════════════════════════════════════════════
+
+describe('Cycle 87: Python Data Processing', () => {
+  it('catches pandas read_csv with user path', async () => {
+    const findings = await scanCode(
+      `df = pd.read_csv(request.args['file_path'])`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'PANDAS_READ_CSV_USER_PATH')).toBe(true);
+  });
+
+  it('does NOT flag pandas read_csv with static path', async () => {
+    const findings = await scanCode(
+      `df = pd.read_csv('data/report.csv')`,
+      'analysis.py',
+    );
+    expect(hasRule(findings, 'PANDAS_READ_CSV_USER_PATH')).toBe(false);
+  });
+
+  it('catches openpyxl with keep_vba=True', async () => {
+    const findings = await scanCode(
+      `wb = load_workbook('file.xlsm', keep_vba=True)`,
+      'process.py',
+    );
+    expect(hasRule(findings, 'OPENPYXL_MACRO_ENABLED')).toBe(true);
+  });
+
+  it('catches PIL MAX_IMAGE_PIXELS set to None', async () => {
+    const findings = await scanCode(
+      `Image.MAX_IMAGE_PIXELS = None`,
+      'images.py',
+    );
+    expect(hasRule(findings, 'PIL_IMAGE_BOMB')).toBe(true);
+  });
+
+  it('catches csv.reader without field_size_limit', async () => {
+    const findings = await scanCode(
+      `reader = csv.reader(open('data.csv'))`,
+      'process.py',
+    );
+    expect(hasRule(findings, 'CSV_READER_NO_FIELD_SIZE_LIMIT')).toBe(true);
+  });
+
+  it('does NOT flag csv.reader with field_size_limit set', async () => {
+    const findings = await scanCode(
+      `import csv\ncsv.field_size_limit(131072)\nreader = csv.reader(open('data.csv'))`,
+      'process.py',
+    );
+    expect(hasRule(findings, 'CSV_READER_NO_FIELD_SIZE_LIMIT')).toBe(false);
+  });
+
+  it('catches json.loads on request body', async () => {
+    const findings = await scanCode(
+      `data = json.loads(request.body)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'JSON_LOADS_NO_SIZE_LIMIT')).toBe(true);
+  });
+
+  it('catches yaml.load without SafeLoader', async () => {
+    const findings = await scanCode(
+      `data = yaml.load(content)`,
+      'config.py',
+    );
+    expect(hasRule(findings, 'YAML_LOAD_UNSAFE_LOADER')).toBe(true);
+  });
+
+  it('does NOT flag yaml.safe_load', async () => {
+    const findings = await scanCode(
+      `data = yaml.safe_load(content)`,
+      'config.py',
+    );
+    expect(hasRule(findings, 'YAML_LOAD_UNSAFE_LOADER')).toBe(false);
+  });
+
+  it('catches sqlite3.connect with user path', async () => {
+    const findings = await scanCode(
+      `conn = sqlite3.connect(request.args['db_path'])`,
+      'db.py',
+    );
+    expect(hasRule(findings, 'SQLITE3_USER_DB_PATH')).toBe(true);
+  });
+
+  it('catches h5py with user file path', async () => {
+    const findings = await scanCode(
+      `f = h5py.File(request.files['data'].filename, 'r')`,
+      'process.py',
+    );
+    expect(hasRule(findings, 'H5PY_UNTRUSTED_HDF5')).toBe(true);
+  });
+
+  it('catches pd.read_parquet with user path', async () => {
+    const findings = await scanCode(
+      `df = pd.read_parquet(request.args['file_path'])`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'PARQUET_USER_SCHEMA')).toBe(true);
+  });
+
+  it('catches xlrd with user file', async () => {
+    const findings = await scanCode(
+      `wb = xlrd.open_workbook(request.files['upload'].filename)`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'XLRD_FORMULA_EVAL')).toBe(true);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 88: Python Web Scraping & Network
+// ════════════════════════════════════════════
+
+describe('Cycle 88: Python Web Scraping & Network', () => {
+  it('catches requests.get without timeout', async () => {
+    const findings = await scanCode(
+      `response = requests.get(url)`,
+      'client.py',
+    );
+    expect(hasRule(findings, 'REQUESTS_NO_TIMEOUT')).toBe(true);
+  });
+
+  it('does NOT flag requests.get with timeout', async () => {
+    const findings = await scanCode(
+      `response = requests.get(url, timeout=30)`,
+      'client.py',
+    );
+    expect(hasRule(findings, 'REQUESTS_NO_TIMEOUT')).toBe(false);
+  });
+
+  it('catches urllib3.disable_warnings', async () => {
+    const findings = await scanCode(
+      `urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)`,
+      'client.py',
+    );
+    expect(hasRule(findings, 'URLLIB3_DISABLED_WARNINGS')).toBe(true);
+  });
+
+  it('catches selenium driver.get with user URL', async () => {
+    const findings = await scanCode(
+      `driver.get(request.args['url'])`,
+      'scraper.py',
+    );
+    expect(hasRule(findings, 'SELENIUM_USER_URL')).toBe(true);
+  });
+
+  it('catches BeautifulSoup with lxml-xml parser', async () => {
+    const findings = await scanCode(
+      `soup = BeautifulSoup(xml_data, 'lxml-xml')`,
+      'parser.py',
+    );
+    expect(hasRule(findings, 'BEAUTIFULSOUP_LXML_UNTRUSTED_XML')).toBe(true);
+  });
+
+  it('does NOT flag BeautifulSoup with html.parser', async () => {
+    const findings = await scanCode(
+      `soup = BeautifulSoup(html_data, 'html.parser')`,
+      'parser.py',
+    );
+    expect(hasRule(findings, 'BEAUTIFULSOUP_LXML_UNTRUSTED_XML')).toBe(false);
+  });
+
+  it('catches Paramiko exec_command with f-string', async () => {
+    const findings = await scanCode(
+      `stdin, stdout, stderr = client.exec_command(f"grep {user_input} /var/log/app.log")`,
+      'ssh.py',
+    );
+    expect(hasRule(findings, 'PARAMIKO_EXEC_USER_INPUT')).toBe(true);
+  });
+
+  it('catches ftplib without TLS', async () => {
+    const findings = await scanCode(
+      `ftp = ftplib.FTP('ftp.example.com')`,
+      'transfer.py',
+    );
+    expect(hasRule(findings, 'FTPLIB_NO_TLS')).toBe(true);
+  });
+
+  it('does NOT flag ftplib with FTP_TLS', async () => {
+    const findings = await scanCode(
+      `ftp = ftplib.FTP_TLS('ftp.example.com')`,
+      'transfer.py',
+    );
+    expect(hasRule(findings, 'FTPLIB_NO_TLS')).toBe(false);
+  });
+
+  it('catches socket bind to 0.0.0.0', async () => {
+    const findings = await scanCode(
+      `s.bind(('0.0.0.0', 8080))`,
+      'server.py',
+    );
+    expect(hasRule(findings, 'SOCKET_BIND_ALL_INTERFACES')).toBe(true);
+  });
+
+  it('catches httplib2 without cert verification', async () => {
+    const findings = await scanCode(
+      `h = httplib2.Http(disable_ssl_certificate_validation=True)`,
+      'client.py',
+    );
+    expect(hasRule(findings, 'HTTPLIB2_NO_CERT_VERIFY')).toBe(true);
+  });
+
+  it('catches DNS resolver with user query', async () => {
+    const findings = await scanCode(
+      `answer = resolver.resolve(request.args['domain'], 'A')`,
+      'dns.py',
+    );
+    expect(hasRule(findings, 'DNS_RESOLVER_USER_QUERY')).toBe(true);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 89: Python Testing & DevOps
+// ════════════════════════════════════════════
+
+describe('Cycle 89: Python Testing & DevOps', () => {
+  it('catches pytest fixture with hardcoded password', async () => {
+    const findings = await scanCode(
+      `@pytest.fixture\ndef test_user():\n    password = 'SuperSecretPass123!'`,
+      'conftest.py',
+    );
+    expect(hasRule(findings, 'PYTEST_FIXTURE_REAL_CREDS')).toBe(true);
+  });
+
+  it('catches mock side_effect with eval', async () => {
+    const findings = await scanCode(
+      `mock.patch('module.func', side_effect=eval(code))`,
+      'test_views.py',
+    );
+    expect(hasRule(findings, 'UNITTEST_MOCK_SIDE_EFFECT_EXEC')).toBe(true);
+  });
+
+  it('does NOT flag mock side_effect with lambda', async () => {
+    const findings = await scanCode(
+      `mock.patch('module.func', side_effect=lambda x: x + 1)`,
+      'test_views.py',
+    );
+    expect(hasRule(findings, 'UNITTEST_MOCK_SIDE_EFFECT_EXEC')).toBe(false);
+  });
+
+  it('catches fabric Connection.run with f-string', async () => {
+    const findings = await scanCode(
+      `from fabric import Connection\nc = Connection('host')\nc.run(f"deploy {user_input}")`,
+      'deploy.py',
+    );
+    expect(hasRule(findings, 'FABRIC_INVOKE_USER_CMD')).toBe(true);
+  });
+
+  it('catches boto3 with user-controlled region', async () => {
+    const findings = await scanCode(
+      `client = boto3.client('s3', region_name=request.args['region'])`,
+      'aws.py',
+    );
+    expect(hasRule(findings, 'BOTO3_NO_REGION_VALIDATION')).toBe(true);
+  });
+
+  it('does NOT flag boto3 with static region', async () => {
+    const findings = await scanCode(
+      `client = boto3.client('s3', region_name='us-east-1')`,
+      'aws.py',
+    );
+    expect(hasRule(findings, 'BOTO3_NO_REGION_VALIDATION')).toBe(false);
+  });
+
+  it('catches docker-py with user-controlled image', async () => {
+    const findings = await scanCode(
+      `client.containers.run(request.json['image_name'], detach=True)`,
+      'docker_mgr.py',
+    );
+    expect(hasRule(findings, 'DOCKER_PY_USER_IMAGE')).toBe(true);
+  });
+
+  it('catches Kubernetes client with user namespace', async () => {
+    const findings = await scanCode(
+      `pods = v1.list_namespaced_pod(namespace=request.args['ns'])`,
+      'k8s.py',
+    );
+    expect(hasRule(findings, 'K8S_CLIENT_USER_NAMESPACE')).toBe(true);
+  });
+
+  it('catches Celery send_task with user task name', async () => {
+    const findings = await scanCode(
+      `result = app.send_task(request.json['task_name'], args=[data])`,
+      'tasks.py',
+    );
+    expect(hasRule(findings, 'CELERY_TASK_USER_ARGS')).toBe(true);
+  });
+
+  it('catches gunicorn with debug loglevel', async () => {
+    const findings = await scanCode(
+      `# gunicorn config\nloglevel = 'debug'`,
+      'gunicorn.py',
+    );
+    expect(hasRule(findings, 'GUNICORN_DEBUG_MODE')).toBe(true);
+  });
+});
+
+// ════════════════════════════════════════════
+// Cycle 90: Final Python FP Hardening (25 FP tests)
+// ════════════════════════════════════════════
+
+describe('Cycle 90: Python False Positive Hardening', () => {
+  it('does NOT flag Django model field definition with CharField', async () => {
+    const findings = await scanCode(
+      `class Article(models.Model):\n    title = models.CharField(max_length=200)\n    slug = models.SlugField(max_length=200)`,
+      'models.py',
+    );
+    expect(hasRule(findings, 'DJANGO_CHARFIELD_NO_MAX_LENGTH')).toBe(false);
+  });
+
+  it('does NOT flag Flask route with login_required decorator', async () => {
+    const findings = await scanCode(
+      `from flask_login import login_required\n@app.route('/dashboard')\n@login_required\ndef dashboard():\n    return render_template('dashboard.html')`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'FLASK_BLUEPRINT_NO_AUTH')).toBe(false);
+  });
+
+  it('does NOT flag FastAPI Depends chain with proper yield', async () => {
+    const findings = await scanCode(
+      `async def get_db():\n    db = SessionLocal()\n    try:\n        yield db\n    finally:\n        db.close()`,
+      'deps.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_DEPENDS_NO_ERROR_HANDLING')).toBe(false);
+  });
+
+  it('does NOT flag SQLAlchemy model class definition', async () => {
+    const findings = await scanCode(
+      `class User(Base):\n    __tablename__ = "users"\n    id = Column(Integer, primary_key=True)\n    email = Column(String(255), unique=True)`,
+      'models.py',
+    );
+    expect(hasRule(findings, 'FLASK_SQLALCHEMY_RAW_SQL')).toBe(false);
+  });
+
+  it('does NOT flag Alembic migration upgrade function', async () => {
+    const findings = await scanCode(
+      `def upgrade():\n    op.create_table('users',\n        sa.Column('id', sa.Integer(), nullable=False),\n        sa.Column('name', sa.String(length=255)))`,
+      'versions_001.py',
+    );
+    expect(hasRule(findings, 'FLASK_MIGRATE_USER_REVISION')).toBe(false);
+  });
+
+  it('does NOT flag pytest fixture with mock data', async () => {
+    const findings = await scanCode(
+      `@pytest.fixture\ndef sample_data():\n    return {"name": "Test User", "email": "test@example.com"}`,
+      'conftest.py',
+    );
+    expect(hasRule(findings, 'PYTEST_FIXTURE_REAL_CREDS')).toBe(false);
+  });
+
+  it('does NOT flag Pydantic BaseModel definition with Field', async () => {
+    const findings = await scanCode(
+      `class ItemCreate(BaseModel):\n    name: str = Field(..., min_length=1, max_length=100)\n    price: float = Field(..., gt=0)\n    @field_validator('name')\n    def validate_name(cls, v):\n        return v.strip()`,
+      'schemas.py',
+    );
+    expect(hasRule(findings, 'PYDANTIC_MODEL_NO_VALIDATORS')).toBe(false);
+  });
+
+  it('does NOT flag Django form with clean method', async () => {
+    const findings = await scanCode(
+      `class ContactForm(forms.Form):\n    email = forms.EmailField()\n    message = forms.CharField(widget=forms.Textarea)\n    def clean_email(self):\n        email = self.cleaned_data['email']\n        return email.lower()`,
+      'forms.py',
+    );
+    expect(hasRule(findings, 'DJANGO_MODELFORM_EXCLUDE')).toBe(false);
+  });
+
+  it('does NOT flag type hints containing security-related names', async () => {
+    const findings = await scanCode(
+      `def get_token_data(token: str) -> TokenPayload:\n    """Decode and validate the token."""\n    return decode_token(token)`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'PYJWT_NO_ALGORITHM_VERIFY')).toBe(false);
+  });
+
+  it('does NOT flag Django management command', async () => {
+    const findings = await scanCode(
+      `from django.core.management.base import BaseCommand\nclass Command(BaseCommand):\n    help = 'Import data from CSV'\n    def handle(self, *args, **options):\n        self.stdout.write('Starting import...')`,
+      'import_data.py',
+    );
+    expect(hasRule(findings, 'DJANGO_REDIRECT_USER_URL')).toBe(false);
+  });
+
+  it('does NOT flag Django admin.site.register', async () => {
+    const findings = await scanCode(
+      `from django.contrib import admin\nfrom .models import Article\nadmin.site.register(Article)`,
+      'admin.py',
+    );
+    expect(hasRule(findings, 'DJANGO_ADMIN_NO_2FA')).toBe(false);
+  });
+
+  it('does NOT flag Flask-Login UserMixin class', async () => {
+    const findings = await scanCode(
+      `from flask_login import UserMixin\nclass User(UserMixin, db.Model):\n    id = db.Column(db.Integer, primary_key=True)\n    username = db.Column(db.String(80))`,
+      'models.py',
+    );
+    expect(hasRule(findings, 'FLASK_LOGIN_NO_SESSION_PROTECTION')).toBe(false);
+  });
+
+  it('does NOT flag FastAPI Security dependency', async () => {
+    const findings = await scanCode(
+      `from fastapi.security import OAuth2PasswordBearer\noauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")\nasync def get_current_user(token: str = Depends(oauth2_scheme)):\n    return verify_token(token)`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'FASTAPI_WEBSOCKET_NO_AUTH')).toBe(false);
+  });
+
+  it('does NOT flag dataclass definition', async () => {
+    const findings = await scanCode(
+      `from dataclasses import dataclass\n@dataclass\nclass Config:\n    host: str\n    port: int\n    debug: bool = False`,
+      'config.py',
+    );
+    expect(hasRule(findings, 'PYDANTIC_ARBITRARY_TYPES')).toBe(false);
+  });
+
+  it('does NOT flag Django settings with env() calls', async () => {
+    const findings = await scanCode(
+      `import environ\nenv = environ.Env()\nSECRET_KEY = env('SECRET_KEY')\nDEBUG = env.bool('DEBUG', default=False)\nDATABASES = {'default': env.db()}`,
+      'settings.py',
+    );
+    expect(hasRule(findings, 'DJANGO_SECRET_KEY_HARDCODED')).toBe(false);
+  });
+
+  it('does NOT flag requests.post with timeout', async () => {
+    const findings = await scanCode(
+      `response = requests.post(url, json=data, timeout=30, headers=headers)`,
+      'api_client.py',
+    );
+    expect(hasRule(findings, 'REQUESTS_NO_TIMEOUT')).toBe(false);
+  });
+
+  it('does NOT flag socket bind to localhost', async () => {
+    const findings = await scanCode(
+      `s.bind(('127.0.0.1', 8080))`,
+      'server.py',
+    );
+    expect(hasRule(findings, 'SOCKET_BIND_ALL_INTERFACES')).toBe(false);
+  });
+
+  it('does NOT flag yaml.load with SafeLoader', async () => {
+    const findings = await scanCode(
+      `data = yaml.load(content, Loader=yaml.SafeLoader)`,
+      'config.py',
+    );
+    expect(hasRule(findings, 'YAML_LOAD_UNSAFE_LOADER')).toBe(false);
+  });
+
+  it('does NOT flag bcrypt with 12 rounds (gensalt)', async () => {
+    const findings = await scanCode(
+      `hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=14))`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'BCRYPT_LOW_ROUNDS')).toBe(false);
+  });
+
+  it('does NOT flag Fernet with env key', async () => {
+    const findings = await scanCode(
+      `key = os.environ['FERNET_KEY']\nf = Fernet(key.encode())`,
+      'crypto.py',
+    );
+    expect(hasRule(findings, 'FERNET_HARDCODED_KEY')).toBe(false);
+  });
+
+  it('does NOT flag PyJWT with explicit algorithms', async () => {
+    const findings = await scanCode(
+      `payload = jwt.decode(token, public_key, algorithms=["RS256"])`,
+      'auth.py',
+    );
+    expect(hasRule(findings, 'PYJWT_NO_ALGORITHM_VERIFY')).toBe(false);
+  });
+
+  it('does NOT flag static redirect URL', async () => {
+    const findings = await scanCode(
+      `return redirect(reverse('home'))`,
+      'views.py',
+    );
+    expect(hasRule(findings, 'DJANGO_REDIRECT_USER_URL')).toBe(false);
+  });
+
+  it('does NOT flag ssl.PROTOCOL_TLS_CLIENT', async () => {
+    const findings = await scanCode(
+      `context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)\ncontext.load_default_certs()`,
+      'tls.py',
+    );
+    expect(hasRule(findings, 'SSL_WEAK_PROTOCOL')).toBe(false);
+  });
+
+  it('does NOT flag pandas read_csv with static path', async () => {
+    const findings = await scanCode(
+      `df = pd.read_csv('/data/reports/monthly.csv', dtype={'amount': float})`,
+      'analysis.py',
+    );
+    expect(hasRule(findings, 'PANDAS_READ_CSV_USER_PATH')).toBe(false);
+  });
+
+  it('does NOT flag ftplib.FTP_TLS', async () => {
+    const findings = await scanCode(
+      `ftp = ftplib.FTP_TLS('secure.example.com')\nftp.prot_p()`,
+      'transfer.py',
+    );
+    expect(hasRule(findings, 'FTPLIB_NO_TLS')).toBe(false);
+  });
+});

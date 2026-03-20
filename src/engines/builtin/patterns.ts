@@ -156,8 +156,47 @@ function isFrameworkSource(filePath: string): boolean {
   // Express framework source
   if (/\/express\/lib\//.test(lower)) return true;
   // Hono framework source
-  if (/\/hono\/src\//.test(lower) && /\/hono\//.test(lower)) return true;
+  if (/\/hono\/src\//.test(lower)) return true;
+  // Cookie/session libraries
+  if (/\/tough-cookie\//.test(lower)) return true;
+  if (/\/cookie\/index\./.test(lower) || /\/cookie\/src\//.test(lower)) return true;
+  if (/\/express-session\//.test(lower)) return true;
+  if (/\/cookie-parser\//.test(lower)) return true;
+  // Next.js framework source
+  if (/\/next\/dist\//.test(lower) || /\/next\/src\//.test(lower)) return true;
+  // Koa framework source
+  if (/\/koa\/lib\//.test(lower)) return true;
+  // Payload CMS framework source
+  if (/\/payload\/(?:src|dist)\//.test(lower)) return true;
+  if (/\/payload-cloud\//.test(lower)) return true;
+  // Generic: detect when scanning inside a package's own source by checking
+  // if the path matches a well-known framework directory structure
+  if (/\/node_modules\/[^/]+\/(?:src|lib|dist)\//.test(lower)) return true;
   return false;
+}
+
+// ── Helper: Check if file is part of a cookie/session library ──
+
+function isCookieLibrarySource(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return (
+    /\/hono\/src\//.test(lower) ||
+    /\/tough-cookie\//.test(lower) ||
+    /\/cookie\//.test(lower) && !/\/app\//.test(lower) && !/\/src\/(?!.*cookie)/.test(lower) ||
+    /\/express\/lib\//.test(lower) ||
+    /\/cookie-parser\//.test(lower) ||
+    /\/express-session\//.test(lower) ||
+    /\/connect\//.test(lower) && /session|cookie/.test(lower) ||
+    /\/set-cookie-parser\//.test(lower) ||
+    /\/cookies\//.test(lower) && /\/lib\//.test(lower)
+  );
+}
+
+// ── Helper: Check if file is in an example or docs directory ──
+
+function isExampleOrDocsDir(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return /\/(docs_src|docs|examples|example|tutorials|tutorial|samples|sample|demo|demos)\//i.test(lower);
 }
 
 // ── Pattern Rules ──
@@ -1129,6 +1168,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip cookie library source code
+      if (isFrameworkSource(ctx.filePath) || isCookieLibrarySource(ctx.filePath)) return false;
       // Match res.cookie(...) calls
       if (!/\bres\s*\.\s*cookie\s*\(/.test(line)) return false;
       // Check for httpOnly in a 5-line window
@@ -1152,6 +1193,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip cookie library source code
+      if (isFrameworkSource(ctx.filePath) || isCookieLibrarySource(ctx.filePath)) return false;
       if (!/\bres\s*\.\s*cookie\s*\(/.test(line)) return false;
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines
@@ -6515,7 +6558,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Skip cookie library source code (hono/cookie, express/cookie, tough-cookie, etc.)
+      if (isFrameworkSource(ctx.filePath) || isCookieLibrarySource(ctx.filePath)) return false;
       if (!/\b(?:setCookie|cookie|Set-Cookie)\b/i.test(line)) return false;
       if (!/\b(?:httpOnly|secure|maxAge|expires|domain|path)\b/.test(line)) return false;
       return !/\bsameSite\b/i.test(line) && !/\bsame_site\b/i.test(line);
@@ -6604,7 +6649,8 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      if (isFrameworkSource(ctx.filePath) || isCookieLibrarySource(ctx.filePath)) return false;
       if (!/\bdomain\s*[=:]\s*['"`]\./.test(line)) return false;
       return /\b(?:cookie|session|setCookie|Set-Cookie)\b/i.test(line) &&
         /\bdomain\s*[=:]\s*['"`]\.\w+\.\w+['"`]/.test(line);
@@ -6929,7 +6975,8 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      if (isFrameworkSource(ctx.filePath) || isCookieLibrarySource(ctx.filePath)) return false;
       if (!/\bcookieSession\s*\(/.test(line)) return false;
       return !/\bencrypt\b/i.test(line);
     },
@@ -8452,15 +8499,22 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/\bawait\s+fetch\s*\(/.test(line)) return false;
+      if (isFrameworkSource(ctx.filePath)) return false;
       if (/\b(?:\.ok|\.status|response\.ok)\b/.test(line)) return false;
       const lineIdx = ctx.lineNumber - 1;
-      const nextLines = ctx.allLines.slice(lineIdx + 1, Math.min(ctx.allLines.length, lineIdx + 6)).join('\n');
-      if (/\b(?:\.ok|\.status|response\.ok|res\.ok)\b/.test(nextLines)) return false;
-      // Check for surrounding try/catch or .catch()
-      const beforeLines = ctx.allLines.slice(Math.max(0, lineIdx - 5), lineIdx).join('\n');
+      // Expand forward window to 12 lines (was 6) to catch response checks further down
+      const nextLines = ctx.allLines.slice(lineIdx + 1, Math.min(ctx.allLines.length, lineIdx + 12)).join('\n');
+      if (/\b(?:\.ok|\.status|response\.ok|res\.ok|\.statusText)\b/.test(nextLines)) return false;
+      // Expand backward window to 15 lines (was 5) to catch try blocks further up
+      const beforeLines = ctx.allLines.slice(Math.max(0, lineIdx - 15), lineIdx).join('\n');
       if (/\btry\s*\{/.test(beforeLines)) return false;
       if (/\.catch\s*\(/.test(nextLines)) return false;
       if (/\.catch\s*\(/.test(line)) return false;
+      // Skip if file has a global error handler (wrapper function, interceptor, etc.)
+      if (/\b(?:onError|errorHandler|handleError|interceptor|ErrorBoundary|globalErrorHandler|fetchWrapper|safeFetch|apiFetch)\b/.test(ctx.fileContent)) return false;
+      // Skip if this is inside a utility/helper function (likely a fetch wrapper)
+      const funcContext = ctx.allLines.slice(Math.max(0, lineIdx - 20), lineIdx).join('\n');
+      if (/(?:export\s+)?(?:async\s+)?function\s+\w*(?:fetch|request|api|http)\w*\s*\(/i.test(funcContext)) return false;
       return true;
     },
   },
@@ -9833,7 +9887,8 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      if (isFrameworkSource(ctx.filePath) || isCookieLibrarySource(ctx.filePath)) return false;
       if (!/\b(?:setCookie|cookie|res\.cookie)\s*\(/.test(line)) return false;
       return /\b(?:password|secret|token|creditCard|ssn|private)\b/i.test(line) &&
         !/\b(?:name|key|label)\b/i.test(line);
@@ -10308,6 +10363,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip framework source code (hono, express, etc.)
+      if (isFrameworkSource(ctx.filePath)) return false;
       if (!/\b(?:mimetype|mimeType|mime_type|content-type|contentType)\b/.test(line)) return false;
       if (!/\b(?:includes|===|==|startsWith|match)\b/.test(line)) return false;
       const lineIdx = ctx.lineNumber - 1;
@@ -10350,6 +10407,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip cookie library source code
+      if (isFrameworkSource(ctx.filePath) || isCookieLibrarySource(ctx.filePath)) return false;
       if (!/\bres\.cookie\s*\(/.test(line)) return false;
       if (/\bsameSite\b/i.test(line)) return false;
       const lineIdx = ctx.lineNumber - 1;
@@ -13017,7 +13076,8 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      if (isFrameworkSource(ctx.filePath) || isCookieLibrarySource(ctx.filePath)) return false;
       return /\bcookieParser\s*\(\s*\)/.test(line);
     },
   },
@@ -17113,7 +17173,7 @@ const RULES: PatternRule[] = [
   {
     id: 'PYDANTIC_MODEL_NO_VALIDATORS',
     category: 'Data Validation',
-    description: 'Pydantic model with sensitive fields but no field validators — weak input validation.',
+    description: 'Pydantic model used as API request body with sensitive fields but no field validators — weak input validation.',
     severity: 'medium',
     fix_suggestion: 'Add @field_validator or @validator for fields like email, password, URL to enforce format constraints.',
     auto_fixable: false,
@@ -17121,9 +17181,25 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip framework source and example directories
+      if (isFrameworkSource(ctx.filePath)) return false;
+      if (isExampleOrDocsDir(ctx.filePath)) return false;
       if (!/\bclass\b.*\bBaseModel\b/.test(line)) return false;
       const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 20)).join(' ');
-      return /(?:password|email|url|phone)\s*:\s*str/.test(below) && !/validator|field_validator|Field\s*\(/.test(below);
+      // Must have sensitive fields
+      if (!/(?:password|email|url|phone)\s*:\s*str/.test(below)) return false;
+      // Must NOT already have validators
+      if (/validator|field_validator|Field\s*\(/.test(below)) return false;
+      // Only flag if the model is used as a request body (referenced in a route handler)
+      // Check if the class name appears in a route handler parameter in the file
+      const classNameMatch = line.match(/\bclass\s+(\w+)/);
+      if (!classNameMatch) return false;
+      const className = classNameMatch[1];
+      // Check if the model class name is referenced as a request body in route handlers
+      const fileContent = ctx.fileContent;
+      const usedInRoute = new RegExp(`@(?:app|router)\\.(?:post|put|patch|delete).*\\n[^)]*\\b${className}\\b`, 'i').test(fileContent) ||
+        new RegExp(`def\\s+\\w+.*${className}\\b`, 'i').test(fileContent);
+      return usedInRoute;
     },
   },
   {
@@ -17202,6 +17278,9 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip framework source, example, and documentation directories
+      if (isFrameworkSource(ctx.filePath)) return false;
+      if (isExampleOrDocsDir(ctx.filePath)) return false;
       if (!/\basync\s+def\s+websocket/.test(line) && !/@\w+\.websocket\s*\(/.test(line)) return false;
       const below = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 15)).join(' ');
       return !/auth|token|verify|jwt|bearer|Depends|Security/.test(below);
@@ -18921,17 +19000,25 @@ const RULES: PatternRule[] = [
   {
     id: 'TS_UNKNOWN_NO_NARROWING',
     category: 'Type Safety',
-    description: 'unknown type used but narrowed with "as" instead of type guard — unsafe type assertion.',
+    description: 'unknown type cast with "as" in security-critical context — unsafe type assertion bypasses validation.',
     severity: 'info',
-    fix_suggestion: 'Use typeof/instanceof type guards or a validation library instead of type assertions.',
+    fix_suggestion: 'Use typeof/instanceof type guards or a validation library instead of type assertions in auth/security code.',
     auto_fixable: false,
     fileTypes: ['.ts', '.tsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
-      // Detect: (something as SomeType) where something is typed as unknown in context
+    detect: (line, ctx) => {
+      // Only fire when `unknown` is cast with `as` in a security-critical context
       if (!/\bunknown\b/.test(line)) return false;
-      return /as\s+[A-Z]\w+/.test(line) && !/as\s+unknown/.test(line);
+      if (!/as\s+[A-Z]\w+/.test(line) || /as\s+unknown/.test(line)) return false;
+      // Must be in a security-critical context: auth, permissions, tokens, session, etc.
+      const securityContext = /\b(auth|token|jwt|session|permission|role|credential|password|secret|user|claim|verify|validate|sanitize|middleware)\b/i;
+      // Check the line itself and the surrounding function/file context
+      if (securityContext.test(line)) return true;
+      // Check nearby lines (function name, variable names)
+      const lineIdx = ctx.lineNumber - 1;
+      const nearbyLines = ctx.allLines.slice(Math.max(0, lineIdx - 10), lineIdx).join('\n');
+      return securityContext.test(nearbyLines);
     },
   },
 

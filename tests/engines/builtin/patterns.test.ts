@@ -2295,9 +2295,9 @@ describe('Cycle 84: FastAPI & Pydantic Deep', () => {
     expect(hasRule(findings, 'FASTAPI_NO_MIDDLEWARE_STACK')).toBe(false);
   });
 
-  it('catches Pydantic model without validators for email', async () => {
+  it('catches Pydantic model without validators for email used in route', async () => {
     const findings = await scanCode(
-      `class UserCreate(BaseModel):\n    email: str\n    password: str\n    name: str`,
+      `class UserCreate(BaseModel):\n    email: str\n    password: str\n    name: str\n\n@app.post("/users")\ndef create_user(data: UserCreate):\n    return {"ok": True}`,
       'schemas.py',
     );
     expect(hasRule(findings, 'PYDANTIC_MODEL_NO_VALIDATORS')).toBe(true);
@@ -3339,6 +3339,197 @@ function flatten(arr) {
         'docs/examples/demo.ts',
       );
       expect(hasRule(findings, 'EVAL_USER_INPUT')).toBe(false);
+    });
+  });
+
+  // ════════════════════════════════════════════
+  // False Positive Regression Tests
+  // Real-world FPs from scanning express, hono, payload, fastapi, flask
+  // ════════════════════════════════════════════
+
+  describe('FP Regression: TS_UNKNOWN_NO_NARROWING', () => {
+    it('does NOT fire on generic unknown-to-type cast in non-security code', async () => {
+      const findings = await scanCode(`
+const data: unknown = JSON.parse(rawText);
+const parsed = data as ConfigOptions;
+console.log(parsed.timeout);
+      `);
+      expect(hasRule(findings, 'TS_UNKNOWN_NO_NARROWING')).toBe(false);
+    });
+
+    it('DOES fire on unknown cast in auth context', async () => {
+      const findings = await scanCode(`
+function getUser(session: { data: unknown }) {
+  const token = session.data;
+  const user: unknown = decodeJwt(token as string); return user as UserClaims;
+}
+      `);
+      // Line with "unknown" and "as UserClaims"; nearby has "session" and "token"
+      expect(hasRule(findings, 'TS_UNKNOWN_NO_NARROWING')).toBe(true);
+    });
+
+    it('does NOT fire on unknown cast in a utility/data transformation', async () => {
+      const findings = await scanCode(`
+function parseResponse(body: unknown): ApiResponse {
+  return body as ApiResponse;
+}
+      `);
+      expect(hasRule(findings, 'TS_UNKNOWN_NO_NARROWING')).toBe(false);
+    });
+  });
+
+  describe('FP Regression: FETCH_NO_ERROR_HANDLING', () => {
+    it('does NOT fire when fetch is inside a try block 10 lines up', async () => {
+      const findings = await scanCode(`
+async function loadData() {
+  try {
+    const headers = getHeaders();
+    const url = buildUrl();
+    const options = { headers };
+    const extra = "some-setup";
+    const debug = true;
+    const mode = "cors";
+    const ref = null;
+    const timeout = 5000;
+    const response = await fetch(url, options);
+    return response.json();
+  } catch (err) {
+    handleError(err);
+  }
+}
+      `);
+      expect(hasRule(findings, 'FETCH_NO_ERROR_HANDLING')).toBe(false);
+    });
+
+    it('does NOT fire when file has a global error handler function', async () => {
+      const findings = await scanCode(`
+function handleError(err: Error) {
+  console.error("Error:", err.message);
+}
+
+async function getData() {
+  const response = await fetch("/api/data");
+  return response.json();
+}
+      `);
+      expect(hasRule(findings, 'FETCH_NO_ERROR_HANDLING')).toBe(false);
+    });
+
+    it('does NOT fire when fetch is inside a fetchWrapper utility', async () => {
+      const findings = await scanCode(`
+export async function fetchWrapper(url: string) {
+  const response = await fetch(url);
+  return response.json();
+}
+      `);
+      expect(hasRule(findings, 'FETCH_NO_ERROR_HANDLING')).toBe(false);
+    });
+
+    it('does NOT fire on framework source code', async () => {
+      const findings = await scanCode(
+        `const response = await fetch(endpoint);`,
+        'node_modules/hono/src/client/fetch.ts',
+      );
+      expect(hasRule(findings, 'FETCH_NO_ERROR_HANDLING')).toBe(false);
+    });
+  });
+
+  describe('FP Regression: COOKIE_NO_SAMESITE on cookie libraries', () => {
+    it('does NOT fire on hono cookie helper source', async () => {
+      const findings = await scanCode(
+        `setCookie(c, "name", "value", { httpOnly: true, secure: true, path: "/" });`,
+        'node_modules/hono/src/helper/cookie/index.ts',
+      );
+      expect(hasRule(findings, 'COOKIE_NO_SAMESITE')).toBe(false);
+    });
+
+    it('does NOT fire on express cookie-parser source', async () => {
+      const findings = await scanCode(
+        `res.cookie("session", token, { httpOnly: true, secure: true, maxAge: 3600 });`,
+        'node_modules/cookie-parser/lib/index.js',
+      );
+      expect(hasRule(findings, 'COOKIE_NO_SAMESITE')).toBe(false);
+    });
+
+    it('DOES fire on application code missing sameSite', async () => {
+      const findings = await scanCode(`
+setCookie(c, "session", token, { httpOnly: true, secure: true, maxAge: 3600 });
+      `);
+      expect(hasRule(findings, 'COOKIE_NO_SAMESITE')).toBe(true);
+    });
+  });
+
+  describe('FP Regression: UPLOAD_MIME_ONLY_CHECK on framework code', () => {
+    it('does NOT fire on hono framework source', async () => {
+      const findings = await scanCode(
+        `if (file.mimeType === "image/png") { return true; }`,
+        'node_modules/hono/src/middleware/body-parser.ts',
+      );
+      expect(hasRule(findings, 'UPLOAD_MIME_ONLY_CHECK')).toBe(false);
+    });
+
+    it('DOES fire on application code with MIME-only check', async () => {
+      const findings = await scanCode(
+        `if (file.mimeType.startsWith("image/")) { saveFile(file); }`,
+        'src/upload-handler.ts',
+      );
+      expect(hasRule(findings, 'UPLOAD_MIME_ONLY_CHECK')).toBe(true);
+    });
+  });
+
+  describe('FP Regression: FASTAPI_WEBSOCKET_NO_AUTH in examples', () => {
+    it('does NOT fire on example directory WebSocket code', async () => {
+      const findings = await scanCode(
+        `async def websocket_endpoint(websocket: WebSocket):\n    await websocket.accept()\n    data = await websocket.receive_text()`,
+        'docs/examples/websocket_demo.py',
+      );
+      expect(hasRule(findings, 'FASTAPI_WEBSOCKET_NO_AUTH')).toBe(false);
+    });
+
+    it('does NOT fire on docs_src directory', async () => {
+      const findings = await scanCode(
+        `async def websocket_endpoint(websocket: WebSocket):\n    await websocket.accept()`,
+        'docs_src/websockets/tutorial001.py',
+      );
+      expect(hasRule(findings, 'FASTAPI_WEBSOCKET_NO_AUTH')).toBe(false);
+    });
+  });
+
+  describe('FP Regression: PYDANTIC_MODEL_NO_VALIDATORS on simple models', () => {
+    it('does NOT fire on a standalone data model not used in routes', async () => {
+      const findings = await scanCode(
+        `class UserProfile(BaseModel):\n    email: str\n    name: str`,
+        'models.py',
+      );
+      expect(hasRule(findings, 'PYDANTIC_MODEL_NO_VALIDATORS')).toBe(false);
+    });
+
+    it('does NOT fire on models in example directories', async () => {
+      const findings = await scanCode(
+        `class CreateUser(BaseModel):\n    email: str\n    password: str`,
+        'examples/schemas.py',
+      );
+      expect(hasRule(findings, 'PYDANTIC_MODEL_NO_VALIDATORS')).toBe(false);
+    });
+  });
+
+  describe('FP Regression: framework source general detection', () => {
+    it('does NOT fire cookie rules on node_modules package source', async () => {
+      const findings = await scanCode(
+        `res.cookie("token", value, { httpOnly: true, secure: true, maxAge: 86400 });`,
+        'node_modules/some-auth-lib/src/session.js',
+      );
+      expect(hasRule(findings, 'COOKIE_NO_SAMESITE')).toBe(false);
+      expect(hasRule(findings, 'COOKIE_MISSING_SAMESITE')).toBe(false);
+      expect(hasRule(findings, 'COOKIE_NO_HTTPONLY')).toBe(false);
+    });
+
+    it('does NOT fire UPLOAD_MIME_ONLY_CHECK on payload CMS source', async () => {
+      const findings = await scanCode(
+        `if (file.mimeType.startsWith("image/")) { processImage(file); }`,
+        'node_modules/payload/src/uploads/handler.ts',
+      );
+      expect(hasRule(findings, 'UPLOAD_MIME_ONLY_CHECK')).toBe(false);
     });
   });
 });

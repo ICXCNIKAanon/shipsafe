@@ -64,7 +64,12 @@ async function formatResults(result: ScanResult): Promise<void> {
   // Score
   const duration = formatDuration(result.scan_duration_ms);
   const scoreColor = result.score === 'A' ? chalk.green : result.score === 'B' ? chalk.yellow : chalk.red;
-  let findingsSummary = `${result.findings.length} findings`;
+  const actionableFindings = result.findings.filter(f => f.severity !== 'info');
+  const infoFindings = result.findings.filter(f => f.severity === 'info');
+  let findingsSummary = `${actionableFindings.length} findings`;
+  if (infoFindings.length > 0) {
+    findingsSummary += chalk.dim(` + ${infoFindings.length} info`);
+  }
   if (result.baseline_suppressed_count !== undefined && result.baseline_suppressed_count > 0) {
     findingsSummary += chalk.dim(` (${result.baseline_suppressed_count} baselined)`);
   }

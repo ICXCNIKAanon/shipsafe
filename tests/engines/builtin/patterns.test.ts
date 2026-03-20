@@ -1927,7 +1927,7 @@ describe('Cycle 81: Django ORM & Models Deep', () => {
 
   it('catches FileField without upload_to', async () => {
     const findings = await scanCode(
-      `document = models.FileField()`,
+      `from django.db import models\ndocument = models.FileField()`,
       'models.py',
     );
     expect(hasRule(findings, 'DJANGO_FILEFIELD_NO_VALIDATION')).toBe(true);
@@ -2305,7 +2305,7 @@ describe('Cycle 84: FastAPI & Pydantic Deep', () => {
 
   it('catches FastAPI BackgroundTask with user function', async () => {
     const findings = await scanCode(
-      `background_tasks.add_task(getattr(module, request.query_params['func']))`,
+      `from fastapi import FastAPI\nbackground_tasks.add_task(getattr(module, request.query_params['func']))`,
       'routes.py',
     );
     expect(hasRule(findings, 'FASTAPI_BACKGROUND_TASK_USER_FUNC')).toBe(true);
@@ -2329,7 +2329,7 @@ describe('Cycle 84: FastAPI & Pydantic Deep', () => {
 
   it('catches FastAPI WebSocket without auth', async () => {
     const findings = await scanCode(
-      `@app.websocket("/ws")\nasync def websocket_endpoint(websocket: WebSocket):\n    await websocket.accept()\n    data = await websocket.receive_text()`,
+      `from fastapi import FastAPI\n@app.websocket("/ws")\nasync def websocket_endpoint(websocket: WebSocket):\n    await websocket.accept()\n    data = await websocket.receive_text()`,
       'main.py',
     );
     expect(hasRule(findings, 'FASTAPI_WEBSOCKET_NO_AUTH')).toBe(true);
@@ -2345,7 +2345,7 @@ describe('Cycle 84: FastAPI & Pydantic Deep', () => {
 
   it('catches FastAPI mount with f-string path', async () => {
     const findings = await scanCode(
-      `app.mount(f"/api/{version}", sub_app)`,
+      `from fastapi import FastAPI\napp.mount(f"/api/{version}", sub_app)`,
       'main.py',
     );
     expect(hasRule(findings, 'FASTAPI_MOUNT_NO_PATH_VALIDATION')).toBe(true);
@@ -2361,7 +2361,7 @@ describe('Cycle 84: FastAPI & Pydantic Deep', () => {
 
   it('catches FastAPI Response with user headers', async () => {
     const findings = await scanCode(
-      `return Response(content=data, headers=request.headers)`,
+      `from fastapi import FastAPI\nreturn Response(content=data, headers=request.headers)`,
       'routes.py',
     );
     expect(hasRule(findings, 'FASTAPI_RESPONSE_USER_HEADERS')).toBe(true);

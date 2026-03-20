@@ -2256,6 +2256,11 @@ async function scanFile(
         continue;
       }
 
+      // Skip env var references (process.env.XXX) — not hardcoded secrets
+      if (/\bprocess\.env\.\w+/.test(line) || /\bos\.environ\b/.test(line) || /\bos\.getenv\b/.test(line)) {
+        continue;
+      }
+
       // Entropy check
       if (pattern.entropyCheck) {
         const threshold = pattern.entropyThreshold ?? 3.5;

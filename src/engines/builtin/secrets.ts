@@ -84,6 +84,20 @@ function isPlaceholder(value: string): boolean {
   return PLACEHOLDER_PATTERNS.some((p) => p.test(trimmed));
 }
 
+/**
+ * Detect error code strings / constants that happen to contain "password".
+ * Examples: INVALID_PASSWORD, ACCOUNT_PASSWORD_RESET, PASSWORD_TOO_SHORT
+ * These are NOT actual passwords — they are error codes or enum values.
+ */
+function isErrorCodeOrConstant(value: string): boolean {
+  const trimmed = value.trim().replace(/['"` ]/g, '');
+  // ALL_CAPS_WITH_UNDERSCORES pattern (e.g., INVALID_PASSWORD, ACCOUNT_PASSWORD_RESET)
+  if (/^[A-Z][A-Z0-9_]+$/.test(trimmed)) return true;
+  // Starts with a verb commonly used in error codes / action names
+  if (/^(?:RESET|CHANGE|UPDATE|INVALID|VERIFY|CONFIRM|EXPIRE|REQUIRE|MISSING|WRONG|INCORRECT|SET|GET|CHECK|VALIDATE|CREATE|DELETE|FORGOT|REQUEST)[_A-Z]/i.test(trimmed)) return true;
+  return false;
+}
+
 // ── Localhost URL detection ─────────────────────────────────────────────────────
 
 function isLocalhostUrl(value: string): boolean {
@@ -91,6 +105,33 @@ function isLocalhostUrl(value: string): boolean {
 }
 
 // ── Comment / documentation line detection ─────────────────────────────────────
+
+/**
+ * Detect base64 font data or large data blobs that look like tokens.
+ * JSON files containing font data (otf, woff, ttf) with very large base64
+ * strings are NOT access tokens.
+ */
+function isFontOrDataFile(filePath: string, content: string): boolean {
+  if (!filePath.endsWith('.json')) return false;
+  // Check for font-related keys in the file
+  const lower = content.toLowerCase();
+  return (
+    lower.includes('"otf"') ||
+    lower.includes('"woff"') ||
+    lower.includes('"woff2"') ||
+    lower.includes('"ttf"') ||
+    lower.includes('"font"') ||
+    lower.includes('"data"') && (lower.includes('"font') || lower.includes('font-face'))
+  );
+}
+
+/**
+ * Check if a matched string is too long to be a real token (likely base64 data blob).
+ * Real access tokens are typically <500 characters.
+ */
+function isLargeBase64Blob(value: string): boolean {
+  return value.length > 500;
+}
 
 function isDocOrCommentExample(line: string): boolean {
   const trimmed = line.trim();
@@ -2202,6 +2243,7 @@ async function scanFile(
   const isEnvFile = fileName.startsWith('.env');
   const isEnvExample = fileName === '.env.example' || fileName === '.env.sample';
   const fileIsTestOrDocs = isTestOrDocsFile(filePath);
+  const fileIsFontData = isFontOrDataFile(filePath, content);
   const lines = content.split('\n');
   const findings: Finding[] = [];
 
@@ -2246,6 +2288,19 @@ async function scanFile(
       // Extract the captured group (secret value) or the full match
       const secretValue = match[1] ?? match[0];
 
+      // Skip large base64 blobs in font/data JSON files (not real tokens)
+      if (fileIsFontData && isLargeBase64Blob(secretValue)) {
+        continue;
+      }
+      // Also skip any token-like pattern where the matched value is >500 chars (data blob, not a token)
+      if (isLargeBase64Blob(secretValue) && (
+        pattern.type === 'facebook_access_token' ||
+        pattern.type === 'hardcoded_access_token' ||
+        pattern.type === 'bearer_token'
+      )) {
+        continue;
+      }
+
       // Skip localhost connection strings — not real secrets
       if (isLocalhostUrl(secretValue) || isLocalhostUrl(line)) {
         continue;
@@ -2253,6 +2308,11 @@ async function scanFile(
 
       // Placeholder check
       if (pattern.skipPlaceholders && isPlaceholder(secretValue)) {
+        continue;
+      }
+
+      // Skip error code constants that happen to contain "password" (e.g., INVALID_PASSWORD)
+      if (pattern.type === 'hardcoded_password' && isErrorCodeOrConstant(secretValue)) {
         continue;
       }
 

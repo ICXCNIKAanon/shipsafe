@@ -692,8 +692,22 @@ const RULES: PatternRule[] = [
       // Detect import of child_process and usage with variable inputs
       if (/require\s*\(\s*['"]child_process['"]\s*\)/.test(line)) return false; // just the import, not a finding
       // exec(someVariable) — not a string literal
-      return /\bexec\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*[,)]/.test(line) &&
-        !/\bexec\s*\(\s*(?:"|'|`)/.test(line);
+      if (!/\bexec\s*\(\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*[,)]/.test(line)) return false;
+      if (/\bexec\s*\(\s*(?:"|'|`)/.test(line)) return false;
+      // Exclude RegExp.exec() — look for regex-related patterns before .exec(
+      // e.g., /pattern/.exec(str), someRegex.exec(str), pattern.exec(str)
+      if (/\/[^/]+\/[gimsuy]*\s*\.\s*exec\s*\(/.test(line)) return false;
+      if (/(?:regex|regexp|re|pattern|match|matcher)\s*\.\s*exec\s*\(/i.test(line)) return false;
+      // Check if .exec() is preceded by a variable that looks like a regex
+      if (/[a-zA-Z_$][a-zA-Z0-9_$]*Regex\s*\.\s*exec\s*\(/i.test(line)) return false;
+      if (/[a-zA-Z_$][a-zA-Z0-9_$]*Re\s*\.\s*exec\s*\(/i.test(line)) return false;
+      if (/[a-zA-Z_$][a-zA-Z0-9_$]*Pattern\s*\.\s*exec\s*\(/i.test(line)) return false;
+      // Require child_process context: check imports in the file
+      const hasChildProcessImport = /\bchild_process\b/.test(ctx.fileContent) ||
+        /\bimport\b.*\bexec\b.*\bfrom\b/.test(ctx.fileContent) && /child_process/.test(ctx.fileContent) ||
+        /\brequire\s*\(\s*['"]child_process/.test(ctx.fileContent);
+      if (!hasChildProcessImport) return false;
+      return true;
     },
   },
   {
@@ -1499,10 +1513,17 @@ const RULES: PatternRule[] = [
       const hasSecurityTerm = securityTerms.some(term => lower.includes(term));
       if (!hasSecurityTerm) return false;
       if (/timingSafeEqual/.test(line)) return false;
+      // Skip comparisons against numeric literals or single characters (binary parsers)
+      if (/===\s*(?:0x[0-9a-fA-F]+|\d+|'.'|".")/.test(line) || /(?:0x[0-9a-fA-F]+|\d+|'.'|".")\s*===/.test(line)) return false;
       // Check a wider window (10 lines before and after) for timingSafeEqual usage
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
-      return !/timingSafeEqual/.test(window);
+      if (/timingSafeEqual/.test(window)) return false;
+      // Skip if the surrounding context indicates binary data processing (not security comparison)
+      const widerWindow = ctx.allLines.slice(Math.max(0, lineIdx - 20), Math.min(ctx.allLines.length, lineIdx + 20)).join('\n');
+      if (/\b(?:Buffer|Uint8Array|ArrayBuffer|DataView|Int8Array|Uint16Array|Int16Array|Float32Array|Float64Array)\b/.test(widerWindow) &&
+          !/\b(?:timingSafeEqual|crypto|bcrypt|scrypt|argon)\b/i.test(widerWindow)) return false;
+      return true;
     },
   },
 
@@ -11249,10 +11270,17 @@ const RULES: PatternRule[] = [
     detect: (line, ctx) => {
       // Detect switch(user.role) or switch(role) patterns
       if (!/\bswitch\s*\(\s*(?:user\s*\.\s*)?(?:role|type|permission|accessLevel)\s*\)/.test(line)) return false;
-      // Look ahead for default case within 30 lines
+      // Look ahead for default case or TypeScript exhaustive check within 30 lines
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 30)).join('\n');
-      return !/\bdefault\s*:/.test(window);
+      // default: case covers it
+      if (/\bdefault\s*:/.test(window)) return false;
+      // TypeScript exhaustive checks: `satisfies never`, `assertNever()`, `exhaustiveCheck`, `_exhaustive: never`
+      if (/\bsatisfies\s+never\b/.test(window)) return false;
+      if (/\bassertNever\s*\(/.test(window)) return false;
+      if (/\bexhaustive/i.test(window)) return false;
+      if (/:\s*never\b/.test(window)) return false;
+      return true;
     },
   },
 
@@ -16917,6 +16945,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip migration files — these run in a controlled context, not under concurrent access
+      if (isDjangoMigration(ctx.filePath)) return false;
       if (!/\.update_or_create\s*\(/.test(line) && !/\.get_or_create\s*\(/.test(line)) return false;
       const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 10), ctx.lineNumber).join(' ');
       return !/select_for_update|atomic|transaction/.test(nearby);

@@ -126,13 +126,41 @@ function isWildcardVersion(version: string): boolean {
   return version === '*' || version === 'latest' || version === '';
 }
 
+// Known-legitimate packages that have short names similar to popular packages
+// but are NOT typosquats. These are well-established tools in the ecosystem.
+const KNOWN_LEGITIMATE_PACKAGES = new Set([
+  'recast',
+  'oxlint',
+  'biome',
+  'bun',
+  'esbuild',
+  'swc',
+  'turbopack',
+  'rome',
+  'deno-lint',
+  // Scoped packages — check the unscoped name too
+  '@biomejs/biome',
+  '@swc/core',
+  '@oxlint/core',
+]);
+
 function checkTyposquat(name: string): { isTyposquat: boolean; similarTo?: string } {
+  const lower = name.toLowerCase();
   // If the package itself is a known popular package, it's not a typosquat
-  if (POPULAR_PACKAGES.includes(name.toLowerCase())) {
+  if (POPULAR_PACKAGES.includes(lower)) {
+    return { isTyposquat: false };
+  }
+  // If the package is in the known-legitimate whitelist, it's not a typosquat
+  if (KNOWN_LEGITIMATE_PACKAGES.has(lower)) {
+    return { isTyposquat: false };
+  }
+  // For scoped packages, also check the unscoped portion
+  const unscopedName = lower.startsWith('@') ? lower.replace(/^@[^/]+\//, '') : lower;
+  if (KNOWN_LEGITIMATE_PACKAGES.has(unscopedName)) {
     return { isTyposquat: false };
   }
   for (const popular of POPULAR_PACKAGES) {
-    const distance = editDistance(name.toLowerCase(), popular.toLowerCase());
+    const distance = editDistance(lower, popular.toLowerCase());
     if (distance > 0 && distance <= 2) {
       return { isTyposquat: true, similarTo: popular };
     }

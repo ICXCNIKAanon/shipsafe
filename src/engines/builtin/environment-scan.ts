@@ -41,6 +41,16 @@ export interface EnvironmentScanResult {
   };
 }
 
+// ── Unicode sanitization ──────────────────────────────────────────────────
+
+/** Strip dangerous Unicode characters that could hide malicious instructions. */
+export function sanitizeUnicode(text: string): string {
+  // Strip zero-width characters
+  return text.replace(/[\u200B\u200C\u200D\uFEFF\u200E\u200F]/g, '')
+    // Strip bidirectional overrides
+    .replace(/[\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069]/g, '');
+}
+
 // ── Allowlists ─────────────────────────────────────────────────────────────
 
 /** Known-safe MCP package prefixes for npx invocations. */
@@ -104,6 +114,14 @@ export const MCP_THREAT_PATTERNS: ThreatPattern[] = [
       /bash\s+-i/.test(content) ||
       /mkfifo\s/.test(content) ||
       /ngrok\s/.test(content),
+  },
+  {
+    id: 'MALICIOUS_MCP_INLINE_SCRIPT',
+    category: 'mcp_server',
+    severity: 'critical',
+    description: 'MCP server uses inline script execution (python -c, ruby -e, perl -e) which could run arbitrary code.',
+    detect: (content: string) =>
+      /\b(?:python3?|ruby|perl|node)\s+(?:-[ce]|-exec)\s/.test(content),
   },
 ];
 
@@ -260,6 +278,32 @@ export const PROMPT_INJECTION_PATTERNS: ThreatPattern[] = [
       );
     },
   },
+  {
+    id: 'PROMPT_INJECTION_UNICODE_OBFUSCATION',
+    category: 'prompt_injection',
+    severity: 'critical',
+    description: 'CLAUDE.md contains Unicode obfuscation characters (zero-width spaces, bidirectional overrides) that could hide malicious instructions.',
+    detect: (content: string) => /[\u200B\u200C\u200D\u202A-\u202E\u2066-\u2069]/.test(content),
+  },
+  {
+    id: 'PROMPT_INJECTION_BASE64_COMMAND',
+    category: 'prompt_injection',
+    severity: 'high',
+    description: 'CLAUDE.md contains base64 encode/decode shell commands, commonly used for data exfiltration.',
+    detect: (content: string) => /\|\s*base64\b|base64\s+-[dD]\b|base64\s+--decode/.test(content),
+  },
+  {
+    id: 'PROMPT_INJECTION_SUSPICIOUS_URL',
+    category: 'prompt_injection',
+    severity: 'high',
+    description: 'CLAUDE.md contains URLs to non-standard domains that could be used for data exfiltration or remote instruction loading.',
+    detect: (content: string) => {
+      // Find all URLs
+      const urls = content.match(/https?:\/\/[^\s'")\]]+/gi) || [];
+      const safeHosts = /github\.com|npmjs\.com|anthropic\.com|claude\.ai|vercel\.com|shipsafe\.org|docs\.|stackoverflow\.com|developer\./i;
+      return urls.some(url => !safeHosts.test(url));
+    },
+  },
 ];
 
 export const SKILL_THREAT_PATTERNS: ThreatPattern[] = [
@@ -360,10 +404,20 @@ function runPatterns(
   location: string,
 ): EnvironmentThreat[] {
   const threats: EnvironmentThreat[] = [];
+
+  // Sanitize Unicode before running regex-based threat patterns so that
+  // zero-width characters / bidi overrides cannot break pattern matching.
+  // Note: we run Unicode-obfuscation detection on the ORIGINAL content
+  // before sanitization so the obfuscation itself is detected.
+  const sanitized = sanitizeUnicode(content);
+
   for (const pattern of patterns) {
-    if (pattern.detect(content)) {
+    // For Unicode obfuscation detection, test against original content;
+    // for everything else, test against sanitized content.
+    const testContent = pattern.id === 'PROMPT_INJECTION_UNICODE_OBFUSCATION' ? content : sanitized;
+    if (pattern.detect(testContent)) {
       // Extract a brief evidence snippet — first matching line
-      const lines = content.split('\n');
+      const lines = testContent.split('\n');
       const evidenceLine = lines.find((line) => pattern.detect(line)) ?? lines[0];
       threats.push({
         id: pattern.id,
@@ -409,7 +463,7 @@ function scanMcpConfig(
     );
     threats.push(...serverThreats);
 
-    // Also check env vars for leaked secrets
+    // Also check env vars for leaked secrets and malicious commands
     const env = serverConfig.env as Record<string, string> | undefined;
     if (env && typeof env === 'object') {
       const envString = Object.entries(env)
@@ -421,6 +475,74 @@ function scanMcpConfig(
         `${location} -> ${serverName} (env)`,
       );
       threats.push(...envThreats);
+
+      // Scan env values for malicious commands
+      for (const [envKey, envValue] of Object.entries(env)) {
+        if (typeof envValue !== 'string') continue;
+        const val = envValue;
+
+        // Check for curl|sh, wget|bash, reverse shell patterns
+        if (
+          /curl\s[^|]*\|\s*(sh|bash|zsh|node)/.test(val) ||
+          /wget\s[^|]*\|\s*(sh|bash|zsh|node)/.test(val)
+        ) {
+          threats.push({
+            id: 'MALICIOUS_MCP_ENV_CURL_PIPE',
+            category: 'mcp_server',
+            severity: 'critical',
+            description: 'MCP server env variable contains curl-pipe-shell pattern (remote code execution)',
+            location: `${location} -> ${serverName} (env.${envKey})`,
+            evidence: truncateEvidence(`${envKey}=${val}`),
+          });
+        }
+
+        if (
+          /\/dev\/tcp\//.test(val) ||
+          /bash\s+-i/.test(val) ||
+          /mkfifo\s/.test(val)
+        ) {
+          threats.push({
+            id: 'MALICIOUS_MCP_ENV_REVERSE_SHELL',
+            category: 'mcp_server',
+            severity: 'critical',
+            description: 'MCP server env variable contains reverse shell pattern',
+            location: `${location} -> ${serverName} (env.${envKey})`,
+            evidence: truncateEvidence(`${envKey}=${val}`),
+          });
+        }
+
+        // Flag NODE_OPTIONS containing --require with non-standard paths
+        if (
+          envKey === 'NODE_OPTIONS' &&
+          /--require\s+/.test(val) &&
+          !/--require\s+(?:ts-node|tsconfig-paths|dotenv)/.test(val)
+        ) {
+          threats.push({
+            id: 'MALICIOUS_MCP_ENV_NODE_OPTIONS',
+            category: 'mcp_server',
+            severity: 'high',
+            description: 'MCP server NODE_OPTIONS uses --require with non-standard path (code injection risk)',
+            location: `${location} -> ${serverName} (env.${envKey})`,
+            evidence: truncateEvidence(`${envKey}=${val}`),
+          });
+        }
+
+        // Flag env values containing base64, eval, or shell pipe patterns
+        if (
+          /\bbase64\b/.test(val) ||
+          /\beval\b/.test(val) ||
+          /\|.*\b(sh|bash|zsh|node)\b/.test(val)
+        ) {
+          threats.push({
+            id: 'MALICIOUS_MCP_ENV_SUSPICIOUS_VALUE',
+            category: 'mcp_server',
+            severity: 'high',
+            description: 'MCP server env variable contains suspicious shell patterns (base64, eval, or pipe to shell)',
+            location: `${location} -> ${serverName} (env.${envKey})`,
+            evidence: truncateEvidence(`${envKey}=${val}`),
+          });
+        }
+      }
     }
   }
 

@@ -10,6 +10,7 @@ import { extname, join, relative, resolve } from 'node:path';
 import type { Finding, Severity } from '../../types.js';
 import { loadIgnoreFilter, type IgnoreFilter } from './ignore.js';
 import { loadGitIgnoreFilter } from './gitignore.js';
+import { getAstContext, clearAstCache, type AstContext } from './ast-context.js';
 
 // ── Types ──
 
@@ -29,6 +30,12 @@ interface PatternRule {
   skipCommentsAndStrings?: boolean;
   /** If true, skip test files for this rule. */
   skipTestFiles?: boolean;
+  /**
+   * Optional AST-based check for false-positive suppression.
+   * Runs ONLY after `detect` returns true. If `astCheck` returns false,
+   * the finding is suppressed. Requires tree-sitter parsing.
+   */
+  astCheck?: (line: string, context: LineContext, ast: AstContext) => boolean;
 }
 
 interface LineContext {
@@ -538,6 +545,12 @@ const RULES: PatternRule[] = [
       if (isPrismaSafeOrmCall(line)) return false;
       return /`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{[^}]+\}[^`]*`/i.test(line);
     },
+    astCheck: (_line, _context, ast) => {
+      // Suppress if this is a tagged template literal (sql`...`, prisma.$queryRaw`...`, etc.)
+      // Tagged templates auto-parameterize, so they are safe from SQL injection.
+      if (ast.isTaggedTemplate()) return false;
+      return true;
+    },
   },
   {
     id: 'SQL_INJECTION_RAW_FORMAT',
@@ -645,6 +658,12 @@ const RULES: PatternRule[] = [
       if (/JSON\s*\.\s*stringify\s*\(/.test(line)) return false;
       return true;
     },
+    astCheck: (_line, _context, ast) => {
+      // Suppress if the __html value is wrapped in a sanitization function
+      const safePattern = /sanitize|safe|purify|escape|stringify|clean|encode/i;
+      if (ast.isWrappedBy(safePattern)) return false;
+      return true;
+    },
   },
   {
     id: 'XSS_EVAL',
@@ -665,6 +684,19 @@ const RULES: PatternRule[] = [
       if (/\b(?:redis|client|ioredis|redisClient|cache)\s*\.\s*eval\s*\(/.test(line)) return false;
       // Skip lines referencing Lua scripts (Redis EVAL/EVALSHA)
       if (/\b(?:luaScript|lua|EVALSHA)\b/.test(line)) return false;
+      return true;
+    },
+    astCheck: (_line, _context, ast) => {
+      // Use AST to check the receiver of .eval() — safe receivers are not code injection
+      const receiver = ast.getMethodCallReceiver('eval');
+      if (receiver) {
+        // Redis clients, database clients, and other safe receivers
+        const safeReceivers = /^(?:redis|client|ioredis|redisClient|cache|vm|sandbox|safeEval|mathjs|cel)$/i;
+        if (safeReceivers.test(receiver)) return false;
+        // If the receiver contains "redis" or "cache" anywhere, it's safe
+        if (/redis|cache|lua/i.test(receiver)) return false;
+      }
+      // Bare eval() with no receiver is always dangerous — keep the finding
       return true;
     },
   },
@@ -716,6 +748,17 @@ const RULES: PatternRule[] = [
     detect: (line) => {
       return /\bexec\s*\(\s*(?:"|')[^"']*(?:"|')\s*\+/.test(line) ||
         /\bexec\s*\(\s*`[^`]*\$\{/.test(line);
+    },
+    astCheck: (_line, _context, ast) => {
+      // Check if .exec() is called on a RegExp, not child_process
+      const receiver = ast.getMethodCallReceiver('exec');
+      if (receiver) {
+        // RegExp.exec() is safe — check for regex-like variable names
+        if (/regex|regexp|re$|pattern|match|matcher/i.test(receiver)) return false;
+        // Literal regex: /pattern/.exec(str) — receiver would be the regex literal text
+        if (receiver.startsWith('/')) return false;
+      }
+      return true;
     },
   },
   {
@@ -1204,6 +1247,14 @@ const RULES: PatternRule[] = [
         /\bres\s*\.\s*redirect\s*\(\s*(?:req\.query\.[a-zA-Z]+|req\.params\.[a-zA-Z]+|req\.body\.[a-zA-Z]+)/.test(line) ||
         /\breturn\s+redirect\s*\(\s*request\s*\.\s*(?:GET|POST|args)\b/.test(line)
       );
+    },
+    astCheck: (_line, _context, ast) => {
+      // Suppress if the redirect argument is a string literal (hardcoded safe path)
+      if (ast.isArgumentStringLiteral()) return false;
+      // Suppress if wrapped in a URL validation function
+      const validationPattern = /validate|sanitize|isAllowed|isSafe|allowedRedirect|checkUrl/i;
+      if (ast.isWrappedBy(validationPattern)) return false;
+      return true;
     },
   },
 
@@ -8586,6 +8637,12 @@ const RULES: PatternRule[] = [
         const htmlValue = htmlValueMatch[1];
         if (/\b(?:sanitize|DOMPurify\.sanitize|markdownToSafeHTML|purify|xss|sanitizeHtml|escapeHtml|JSON\.stringify)\s*\(/.test(htmlValue)) return false;
       }
+      return true;
+    },
+    astCheck: (_line, _context, ast) => {
+      // Suppress if the __html value is wrapped in a sanitization function
+      const safePattern = /sanitize|safe|purify|escape|stringify|clean|encode/i;
+      if (ast.isWrappedBy(safePattern)) return false;
       return true;
     },
   },
@@ -20098,7 +20155,7 @@ function getFileType(filePath: string): FileType | null {
   return SCANNABLE_EXTENSIONS.has(ext) ? (ext as FileType) : null;
 }
 
-function scanFileContent(filePath: string, content: string): Finding[] {
+async function scanFileContent(filePath: string, content: string): Promise<Finding[]> {
   const findings: Finding[] = [];
 
   // Skip Prisma schema files (.prisma) — not application code
@@ -20132,6 +20189,9 @@ function scanFileContent(filePath: string, content: string): Finding[] {
   // Track which rules have already flagged multi-line or file-level detections
   const firedOnceRules = new Set<string>();
 
+  // Pending findings that need AST verification (rule, line number, finding)
+  const pendingAstChecks: { rule: PatternRule; lineNumber: number; finding: Finding }[] = [];
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     context.lineNumber = i + 1;
@@ -20150,7 +20210,7 @@ function scanFileContent(filePath: string, content: string): Finding[] {
 
       try {
         if (rule.detect(line, context)) {
-          findings.push({
+          const finding: Finding = {
             id: rule.id,
             engine: 'pattern',
             severity: rule.severity,
@@ -20160,7 +20220,14 @@ function scanFileContent(filePath: string, content: string): Finding[] {
             description: rule.description,
             fix_suggestion: rule.fix_suggestion,
             auto_fixable: rule.auto_fixable,
-          });
+          };
+
+          if (rule.astCheck) {
+            // Defer: needs AST verification before confirming
+            pendingAstChecks.push({ rule, lineNumber: context.lineNumber, finding });
+          } else {
+            findings.push(finding);
+          }
 
           // Mark file-level rules so they only fire once per file
           if (
@@ -20174,6 +20241,42 @@ function scanFileContent(filePath: string, content: string): Finding[] {
         }
       } catch {
         // If a regex or detection function errors, skip this rule for this line
+      }
+    }
+  }
+
+  // ── Phase 2: AST verification for deferred findings ──
+  // Only parse with tree-sitter if we have pending checks (performance guard)
+  if (pendingAstChecks.length > 0) {
+    try {
+      // getAstContext caches the parsed tree per file, so we only parse once
+      // even though we call it for each pending check
+      for (const { rule, lineNumber, finding } of pendingAstChecks) {
+        const ast = await getAstContext(content, lineNumber, filePath);
+        if (!ast) {
+          // Tree-sitter failed (unsupported language, malformed file) — fall back to regex-only
+          findings.push(finding);
+          continue;
+        }
+
+        const line = lines[lineNumber - 1];
+        context.lineNumber = lineNumber;
+
+        try {
+          // astCheck returns true if the finding should be kept (is a real issue)
+          // returns false if the finding should be suppressed (false positive)
+          if (rule.astCheck!(line, context, ast)) {
+            findings.push(finding);
+          }
+        } catch {
+          // If AST check errors, keep the finding (fail-open for safety)
+          findings.push(finding);
+        }
+      }
+    } catch {
+      // If tree-sitter initialization fails entirely, keep all pending findings
+      for (const { finding } of pendingAstChecks) {
+        findings.push(finding);
       }
     }
   }
@@ -20217,7 +20320,7 @@ export async function scanPatterns(
       batch.map(async (filePath) => {
         try {
           const content = await readFile(filePath, 'utf-8');
-          return scanFileContent(filePath, content);
+          return await scanFileContent(filePath, content);
         } catch {
           // Skip files that can't be read (permissions, binary, etc.)
           return [];
@@ -20232,6 +20335,9 @@ export async function scanPatterns(
 
   // Sort by severity: critical > high > medium > low > info
   allFindings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+
+  // Clear AST cache after scan to free memory
+  clearAstCache();
 
   return allFindings;
 }

@@ -3686,3 +3686,61 @@ describe('Next.js false positive exclusions', () => {
     expect(hasRule(findings, 'SERVER_ACTION_NO_CSRF')).toBe(false);
   });
 });
+
+// ════════════════════════════════════════════
+// AST Context Integration Tests
+// ════════════════════════════════════════════
+
+describe('AST context: dangerouslySetInnerHTML suppression', () => {
+  it('suppresses XSS_DANGEROUSLY_SET_INNERHTML when value is wrapped in sanitize()', async () => {
+    const findings = await scanCode(
+      `const el = <div dangerouslySetInnerHTML={{ __html: sanitize(userHtml) }} />;`,
+      'ast-test-sanitized.tsx',
+    );
+    expect(hasRule(findings, 'XSS_DANGEROUSLY_SET_INNERHTML')).toBe(false);
+  });
+
+  it('still flags XSS_DANGEROUSLY_SET_INNERHTML when value is raw variable', async () => {
+    const findings = await scanCode(
+      `const el = <div dangerouslySetInnerHTML={{ __html: rawUserInput }} />;`,
+      'ast-test-raw.tsx',
+    );
+    expect(hasRule(findings, 'XSS_DANGEROUSLY_SET_INNERHTML')).toBe(true);
+  });
+
+  it('suppresses REACT_DANGEROUSLYSETINNERHTML_VARIABLE when wrapped in purify()', async () => {
+    const findings = await scanCode(
+      `const el = <div dangerouslySetInnerHTML={{ __html: purify(content) }} />;`,
+      'ast-test-purify.tsx',
+    );
+    expect(hasRule(findings, 'REACT_DANGEROUSLYSETINNERHTML_VARIABLE')).toBe(false);
+  });
+});
+
+describe('AST context: eval() receiver check', () => {
+  it('suppresses XSS_EVAL when called on a redis client', async () => {
+    const findings = await scanCode(
+      `const result = redis.eval(luaScript, keys, args);`,
+      'ast-test-redis-eval.ts',
+    );
+    expect(hasRule(findings, 'XSS_EVAL')).toBe(false);
+  });
+
+  it('still flags bare eval() call', async () => {
+    const findings = await scanCode(
+      `const result = eval(userInput);`,
+      'ast-test-bare-eval.ts',
+    );
+    expect(hasRule(findings, 'XSS_EVAL')).toBe(true);
+  });
+});
+
+describe('AST context: exec() RegExp suppression', () => {
+  it('suppresses CMD_INJECTION_EXEC_CONCAT when called on a regex variable', async () => {
+    const findings = await scanCode(
+      `const match = myRegex.exec("test" + input);`,
+      'ast-test-regex-exec.ts',
+    );
+    expect(hasRule(findings, 'CMD_INJECTION_EXEC_CONCAT')).toBe(false);
+  });
+});

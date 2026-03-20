@@ -2225,6 +2225,11 @@ async function scanFile(
   if (fileStat.size > MAX_FILE_SIZE) return [];
   if (!fileStat.isFile()) return [];
 
+  // Skip Prisma schema files (.prisma) — not application code
+  if (filePath.endsWith('.prisma')) return [];
+  // Skip Prisma migration files — auto-generated SQL, not user-authored
+  if (/\/prisma\/migrations\//.test(filePath.toLowerCase())) return [];
+
   // Read file contents
   let content: string;
   try {

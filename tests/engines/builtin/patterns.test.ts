@@ -3533,3 +3533,156 @@ setCookie(c, "session", token, { httpOnly: true, secure: true, maxAge: 3600 });
     });
   });
 });
+
+// ════════════════════════════════════════════
+// Framework False Positive Regression Tests
+// Prisma + Next.js specific
+// ════════════════════════════════════════════
+
+describe('Prisma false positive exclusions', () => {
+  it('FP-PRISMA-1: $queryRaw tagged template is safe (auto-parameterized)', async () => {
+    const findings = await scanCode(
+      'const users = await prisma.$queryRaw`SELECT * FROM users WHERE id = ${userId}`;',
+    );
+    // Should NOT trigger any SQL injection rule
+    expect(hasRule(findings, 'SQL_INJECTION_TEMPLATE_STRING')).toBe(false);
+    expect(hasRule(findings, 'SQL_INJECTION_ORM_RAW')).toBe(false);
+    expect(hasRule(findings, 'TEMPLATE_LITERAL_SQL_VARIABLE')).toBe(false);
+    expect(hasRule(findings, 'PRISMA_RAW_UNSAFE')).toBe(false);
+  });
+
+  it('FP-PRISMA-2: $executeRaw tagged template is safe (auto-parameterized)', async () => {
+    const findings = await scanCode(
+      'await prisma.$executeRaw`UPDATE users SET name = ${name} WHERE id = ${id}`;',
+    );
+    expect(hasRule(findings, 'SQL_INJECTION_TEMPLATE_STRING')).toBe(false);
+    expect(hasRule(findings, 'SQL_INJECTION_ORM_RAW')).toBe(false);
+    expect(hasRule(findings, 'TEMPLATE_LITERAL_SQL_VARIABLE')).toBe(false);
+  });
+
+  it('FP-PRISMA-3: prisma.user.findMany() is a safe ORM call — no SQL injection', async () => {
+    const findings = await scanCode(`
+      const users = await prisma.user.findMany({ where: { email: userEmail } });
+    `);
+    expect(hasRule(findings, 'SQL_INJECTION_CONCAT')).toBe(false);
+    expect(hasRule(findings, 'SQL_INJECTION_TEMPLATE')).toBe(false);
+    expect(hasRule(findings, 'SQL_INJECTION_ORM_RAW')).toBe(false);
+  });
+
+  it('FP-PRISMA-4: prisma.post.create() is a safe ORM call — no SQL injection', async () => {
+    const findings = await scanCode(`
+      const post = await prisma.post.create({ data: { title, content, authorId: userId } });
+    `);
+    expect(hasRule(findings, 'SQL_INJECTION_CONCAT')).toBe(false);
+    expect(hasRule(findings, 'SQL_INJECTION_TEMPLATE')).toBe(false);
+    expect(hasRule(findings, 'SQL_INJECTION_ORM_RAW')).toBe(false);
+  });
+
+  it('FP-PRISMA-5: Prisma migration files are completely skipped', async () => {
+    const findings = await scanCode(
+      `const query = "SELECT * FROM users WHERE id = " + userId;`,
+      'prisma/migrations/20240101_init/migration.ts',
+    );
+    // Would normally trigger SQL injection rules, but migration files are skipped
+    expect(findings.length).toBe(0);
+  });
+
+  it('STILL FLAGS: $queryRawUnsafe is genuinely dangerous', async () => {
+    const findings = await scanCode(
+      'const result = await prisma.$queryRawUnsafe(query);',
+    );
+    expect(hasRule(findings, 'PRISMA_RAW_UNSAFE')).toBe(true);
+  });
+
+  it('STILL FLAGS: $executeRawUnsafe is genuinely dangerous', async () => {
+    const findings = await scanCode(
+      'await prisma.$executeRawUnsafe(sql);',
+    );
+    expect(hasRule(findings, 'PRISMA_RAW_UNSAFE')).toBe(true);
+  });
+});
+
+describe('Next.js false positive exclusions', () => {
+  it('FP-NEXTJS-1: revalidatePath() does NOT trigger ON_DEMAND_REVALIDATION_NO_SECRET', async () => {
+    const findings = await scanCode(`
+      import { revalidatePath } from 'next/cache';
+      export async function updatePost(id: string, data: FormData) {
+        await db.post.update({ where: { id }, data: { title: data.get('title') } });
+        revalidatePath('/posts');
+      }
+    `);
+    expect(hasRule(findings, 'ON_DEMAND_REVALIDATION_NO_SECRET')).toBe(false);
+  });
+
+  it('FP-NEXTJS-2: revalidateTag() does NOT trigger ON_DEMAND_REVALIDATION_NO_SECRET', async () => {
+    const findings = await scanCode(`
+      import { revalidateTag } from 'next/cache';
+      export async function refreshData() {
+        revalidateTag('posts');
+      }
+    `);
+    expect(hasRule(findings, 'ON_DEMAND_REVALIDATION_NO_SECRET')).toBe(false);
+  });
+
+  it('FP-NEXTJS-3: dangerouslySetInnerHTML with JSON.stringify is safe', async () => {
+    const findings = await scanCode(`
+      <div dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />
+    `, 'component.tsx');
+    expect(hasRule(findings, 'XSS_DANGEROUSLY_SET_INNERHTML')).toBe(false);
+    expect(hasRule(findings, 'REACT_DANGEROUSLYSETINNERHTML_VARIABLE')).toBe(false);
+  });
+
+  it('FP-NEXTJS-4: Server Action with only revalidatePath does NOT need auth', async () => {
+    const findings = await scanCode(`
+      'use server';
+      export async function refreshPage() {
+        revalidatePath('/dashboard');
+      }
+    `);
+    expect(hasRule(findings, 'NEXT_SERVER_ACTION_NO_AUTH')).toBe(false);
+  });
+
+  it('FP-NEXTJS-5: Vercel cron with verifyQstashSignature is safe', async () => {
+    const findings = await scanCode(`
+      import { verifyQstashSignature } from '@upstash/qstash/nextjs';
+      export async function POST(req: Request) {
+        const body = await verifyQstashSignature(req);
+        await processJob(body);
+      }
+    `, 'app/api/cron/route.ts');
+    expect(hasRule(findings, 'VERCEL_CRON_NO_AUTH')).toBe(false);
+  });
+
+  it('FP-NEXTJS-6: redirect(authOptions.pages.signIn) is config-based, not user input', async () => {
+    const findings = await scanCode(`
+      import { redirect } from 'next/navigation';
+      import { authOptions } from '@/auth';
+      export default async function Page() {
+        const session = await getServerSession();
+        if (!session) redirect(authOptions.pages.signIn);
+        return <div>Protected</div>;
+      }
+    `, 'page.tsx');
+    expect(hasRule(findings, 'NEXTJS_REDIRECT_USER_INPUT')).toBe(false);
+  });
+
+  it('FP-NEXTJS-7: window.location assigned from Stripe session URL is safe', async () => {
+    const findings = await scanCode(`
+      const response = await fetch('/api/checkout', { method: 'POST' });
+      const { url } = await response.json();
+      window.location.href = url;
+    `);
+    // The variable 'url' is assigned from a fetch response, so it's safe
+    expect(hasRule(findings, 'OPEN_REDIRECT_WINDOW')).toBe(false);
+  });
+
+  it('FP-NEXTJS-8: Server Actions have built-in CSRF — SERVER_ACTION_NO_CSRF never fires', async () => {
+    const findings = await scanCode(`
+      'use server';
+      export async function createUser(data: FormData) {
+        await prisma.user.create({ data: { name: data.get('name') as string } });
+      }
+    `);
+    expect(hasRule(findings, 'SERVER_ACTION_NO_CSRF')).toBe(false);
+  });
+});

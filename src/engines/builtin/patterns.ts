@@ -291,6 +291,24 @@ function isDjangoMigration(filePath: string): boolean {
   return /\/migrations\//.test(filePath.toLowerCase());
 }
 
+// ── Helper: Prisma file detection ──
+
+function isPrismaSchemaFile(filePath: string): boolean {
+  return filePath.endsWith('.prisma');
+}
+
+function isPrismaMigrationFile(filePath: string): boolean {
+  return /\/prisma\/migrations\//.test(filePath.toLowerCase());
+}
+
+// ── Helper: Prisma safe ORM operation ──
+// Prisma ORM methods like prisma.user.findMany(), prisma.post.create() etc.
+// are safe parameterized operations — they should never trigger SQL injection rules.
+
+function isPrismaSafeOrmCall(line: string): boolean {
+  return /\bprisma\s*\.\s*[a-zA-Z_]+\s*\.\s*(?:findMany|findFirst|findUnique|create|createMany|update|updateMany|upsert|delete|deleteMany|count|aggregate|groupBy)\s*\(/.test(line);
+}
+
 // ── Helper: Check if file is a database migration file ──
 // Matches paths containing /migrations/, /migrate/, or filenames starting with
 // digit-based prefixes (e.g., 20240101_create_users, 0001_initial).
@@ -432,6 +450,10 @@ const RULES: PatternRule[] = [
     detect: (line, ctx) => {
       // Skip migration files — developer-authored SQL, not user input
       if (isMigrationFile(ctx.filePath)) return false;
+      // Skip Prisma migration files entirely
+      if (isPrismaMigrationFile(ctx.filePath)) return false;
+      // Skip safe Prisma ORM operations (e.g., prisma.user.findMany())
+      if (isPrismaSafeOrmCall(line)) return false;
       // Match patterns like query("SELECT ... " + variable) or db.run("INSERT ... " + variable)
       // Covers: query, execute, raw, prepare, run, get, all, each, exec (SQLite), plus pool/client/connection.query
       // Use separate patterns for double and single quotes to handle embedded opposite quotes
@@ -453,6 +475,10 @@ const RULES: PatternRule[] = [
     detect: (line, ctx) => {
       // Skip migration files — developer-authored SQL, not user input
       if (isMigrationFile(ctx.filePath)) return false;
+      // Skip Prisma migration files entirely
+      if (isPrismaMigrationFile(ctx.filePath)) return false;
+      // Skip safe Prisma ORM operations (e.g., prisma.user.findMany())
+      if (isPrismaSafeOrmCall(line)) return false;
       // Match db.run(`SELECT ... ${...}`) patterns, but NOT tagged template literals like sql`...`
       // Covers: query, execute, raw, prepare, run, get, all, each, exec
       return /\b(?:query|execute|raw|prepare|run|get|all|each|exec)\s*\(\s*`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{/i.test(line);
@@ -472,6 +498,10 @@ const RULES: PatternRule[] = [
     detect: (line, ctx) => {
       // Skip migration files — developer-authored SQL, not user input
       if (isMigrationFile(ctx.filePath)) return false;
+      // Skip Prisma migration files entirely
+      if (isPrismaMigrationFile(ctx.filePath)) return false;
+      // Skip safe Prisma ORM operations (e.g., prisma.user.findMany())
+      if (isPrismaSafeOrmCall(line)) return false;
       // Catch cases where SQL keyword appears in a string concatenated with +, even without a db method on the same line
       // e.g., const sql = "SELECT * FROM users WHERE id = " + userId;
       const hasSqlKeyword = /"(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^"]*"\s*\+\s*[a-zA-Z_$]/i.test(line) ||
@@ -501,9 +531,11 @@ const RULES: PatternRule[] = [
       if (isMigrationFile(ctx.filePath)) return false;
       // Catch template literals containing SQL keywords + interpolation, even outside a db method call
       // e.g., const sql = `SELECT * FROM users WHERE id = ${userId}`;
-      // But NOT tagged templates like sql`...` or Prisma.$queryRaw`...`
+      // But NOT tagged templates like sql`...` or Prisma.$queryRaw`...` / $executeRaw`...`
       if (/\b(?:sql|html|css|gql|graphql)\s*`/.test(line)) return false;
-      if (/\$queryRaw\s*`/.test(line)) return false;
+      if (/\$(?:queryRaw|executeRaw)\s*`/.test(line)) return false;
+      // Skip safe Prisma ORM operations (e.g., prisma.user.findMany())
+      if (isPrismaSafeOrmCall(line)) return false;
       return /`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{[^}]+\}[^`]*`/i.test(line);
     },
   },
@@ -545,6 +577,12 @@ const RULES: PatternRule[] = [
     detect: (line, ctx) => {
       // Skip migration files — developer-authored SQL, not user input
       if (isMigrationFile(ctx.filePath)) return false;
+      // Skip Prisma migration files entirely
+      if (isPrismaMigrationFile(ctx.filePath)) return false;
+      // Skip safe Prisma ORM operations (e.g., prisma.user.findMany())
+      if (isPrismaSafeOrmCall(line)) return false;
+      // Skip Prisma tagged template literals ($queryRaw`...` and $executeRaw`...`) — auto-parameterized
+      if (/\$(?:queryRaw|executeRaw)\s*`/.test(line)) return false;
       // Sequelize, TypeORM, Knex, Prisma, Django, SQLAlchemy raw queries with interpolation
       return (
         /\b(?:sequelize|connection|entityManager|manager|knex|pool|client|db|database)\s*\.\s*(?:query|raw|run|get|all|each|exec)\s*\(\s*`[^`]*\$\{/i.test(line) ||
@@ -602,7 +640,10 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line) => {
-      return /dangerouslySetInnerHTML\s*=/.test(line);
+      if (!/dangerouslySetInnerHTML\s*=/.test(line)) return false;
+      // JSON.stringify() output is always safe — JSON cannot contain executable HTML
+      if (/JSON\s*\.\s*stringify\s*\(/.test(line)) return false;
+      return true;
     },
   },
   {
@@ -1886,11 +1927,27 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
       // Match window.location = userInput, window.location.href = req.query.redirect, etc.
       if (!/\bwindow\s*\.\s*location\s*(?:\.href)?\s*=/.test(line)) return false;
       // Must be assigned from a variable, not a string literal
       if (/\bwindow\s*\.\s*location\s*(?:\.href)?\s*=\s*['"`]/.test(line)) return false;
+      // Skip when URL comes from a known-safe source (API response, Stripe session, etc.)
+      // Extract the variable being assigned
+      const assignMatch = line.match(/\bwindow\s*\.\s*location\s*(?:\.href)?\s*=\s*([a-zA-Z_$][\w$.]*)/);
+      if (assignMatch) {
+        const varName = assignMatch[1];
+        const lineIdx = ctx.lineNumber - 1;
+        const window_ctx = ctx.allLines.slice(Math.max(0, lineIdx - 15), lineIdx + 1).join('\n');
+        const escapedVar = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Skip if the variable is assigned from a fetch/API response or Stripe session
+        // Covers both direct assignment (url = ...) and destructured ({ url } = ...)
+        const directAssign = new RegExp(`\\b${escapedVar}\\s*=\\s*(?:.*\\.(?:url|data\\.url|session\\.url|checkout\\.url)|.*(?:fetch|axios|api|response|res)\\b)`, 'i');
+        const destructuredAssign = new RegExp(`\\{[^}]*\\b${escapedVar}\\b[^}]*\\}\\s*=\\s*(?:.*(?:fetch|axios|response|res|json)\\b)`, 'i');
+        if (directAssign.test(window_ctx) || destructuredAssign.test(window_ctx)) return false;
+        // Skip known safe variable names (Stripe URLs, internal API responses)
+        if (/\b(?:stripe|checkout|session|payment|billing)\b/i.test(varName)) return false;
+      }
       return true;
     },
   },
@@ -3649,10 +3706,25 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
       if (!/\bwindow\s*\.\s*open\s*\(/.test(line)) return false;
-      return /\bwindow\s*\.\s*open\s*\(\s*req\s*\.\s*(?:query|body|params)\b/.test(line) ||
+      // Check for user-controlled URLs
+      const hasUserInput = /\bwindow\s*\.\s*open\s*\(\s*req\s*\.\s*(?:query|body|params)\b/.test(line) ||
         /\bwindow\s*\.\s*open\s*\(\s*(?:userUrl|user_url|url|redirectUrl|redirect_url|targetUrl)\b/.test(line);
+      if (!hasUserInput) return false;
+      // Skip when URL comes from a known-safe source (Stripe session, internal API response)
+      const urlArgMatch = line.match(/\bwindow\s*\.\s*open\s*\(\s*([a-zA-Z_$][\w$.]*)/);
+      if (urlArgMatch) {
+        const varName = urlArgMatch[1];
+        const lineIdx = ctx.lineNumber - 1;
+        const window_ctx = ctx.allLines.slice(Math.max(0, lineIdx - 15), lineIdx + 1).join('\n');
+        // Skip if the variable is assigned from a fetch/API response or Stripe session
+        const varAssignPattern = new RegExp(`\\b${varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*(?:.*\\.(?:url|data\\.url|session\\.url|checkout\\.url)|.*(?:fetch|axios|api|response|res)\\b)`, 'i');
+        if (varAssignPattern.test(window_ctx)) return false;
+        // Skip known safe variable names (Stripe URLs, payment session URLs)
+        if (/\b(?:stripe|checkout|session|payment|billing)\b/i.test(varName)) return false;
+      }
+      return true;
     },
   },
 
@@ -4217,14 +4289,18 @@ const RULES: PatternRule[] = [
       if (!/\bfrom\s+['"]next\//.test(ctx.fileContent) && !/\bnext\/navigation\b/.test(ctx.fileContent) && !/\bnext\/headers\b/.test(ctx.fileContent) && !/['"]use server['"]/.test(ctx.fileContent)) return false;
       // Must NOT be an Express/Fastify file
       if (/\bexpress\s*\(\)|\bfastify\s*\(|\bfrom\s+['"]express['"]|\bfrom\s+['"]fastify['"]/.test(ctx.fileContent)) return false;
-      // Must not be a hardcoded string
+      // Must not be a hardcoded string literal (including backtick with no interpolation)
       if (/\bredirect\s*\(\s*['"`]\/[^'"$`]*['"`]\s*\)/.test(line)) return false;
-      // Check if it uses user input
+      // Skip config-based redirects (e.g., authOptions.pages.signIn, config.redirectUrl)
+      if (/\bredirect\s*\(\s*(?:authOptions|config|settings|options)\s*\./.test(line)) return false;
+      // Only fire when the redirect URL comes from user-controlled sources
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines
         .slice(Math.max(0, lineIdx - 8), lineIdx + 1)
         .join(' ');
-      return /\b(?:searchParams|params|req\s*\.\s*(?:query|body|params)|headers\(\)|url)\b/.test(window);
+      // Must come from req, searchParams, params, or user-controlled variables
+      return /\b(?:searchParams|req\s*\.\s*(?:query|body|params))\b/.test(window) &&
+        /\bredirect\s*\(\s*(?:req\s*\.\s*(?:query|body|params)\s*\.\s*\w+|searchParams\s*\.\s*(?:get\s*\(|\[\s*['"])|\w*[Uu]rl\b)/.test(line);
     },
   },
   {
@@ -4266,13 +4342,9 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/['"]use server['"]/.test(line)) return false;
-      const lineIdx = ctx.lineNumber - 1;
-      const window = ctx.allLines
-        .slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 15))
-        .join(' ');
-      const hasDbMutation = /\b(?:UPDATE|INSERT|DELETE|create|update|delete|remove)\b/i.test(window);
-      const hasCsrfCheck = /\b(?:csrf|origin|referer|csrfToken|verifyOrigin|headers\(\).*origin)\b/i.test(window);
-      return hasDbMutation && !hasCsrfCheck;
+      // Next.js Server Actions (14+) have built-in CSRF protection via origin checking.
+      // The 'use server' directive itself enables the protection. No need to flag.
+      return false;
     },
   },
 
@@ -4913,7 +4985,10 @@ const RULES: PatternRule[] = [
     detect: (line) => {
       // Skip tagged template literals like sql`...`
       if (/\b(?:sql|html|css|gql|graphql)\s*`/.test(line)) return false;
-      if (/\$queryRaw\s*`/.test(line)) return false;
+      // Skip Prisma safe tagged templates ($queryRaw`...` and $executeRaw`...`)
+      if (/\$(?:queryRaw|executeRaw)\s*`/.test(line)) return false;
+      // Skip safe Prisma ORM operations (e.g., prisma.user.findMany())
+      if (isPrismaSafeOrmCall(line)) return false;
       // Match variable assignment like: const query = `SELECT ... ${variable} ...`;
       if (!/\b(?:const|let|var)\s+(?:query|sql|stmt|statement)\s*=\s*`/.test(line)) return false;
       return /`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{[^}]+\}[^`]*`/i.test(line);
@@ -8503,6 +8578,8 @@ const RULES: PatternRule[] = [
       if (!/\bdangerouslySetInnerHTML\b/.test(line)) return false;
       // Skip when the line already uses a known sanitization function
       if (/\b(?:DOMPurify|sanitize|purify|dompurify|xss)\b/i.test(line)) return false;
+      // JSON.stringify() output is always safe — JSON cannot contain executable HTML
+      if (/JSON\s*\.\s*stringify\s*\(/.test(line)) return false;
       // Check the value between __html: and }} for sanitization wrappers
       const htmlValueMatch = line.match(/__html\s*:\s*(.+?)(?:\}\}|$)/);
       if (htmlValueMatch) {
@@ -8757,7 +8834,7 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line) => {
-      return /\b\$(?:executeRawUnsafe|queryRawUnsafe)\s*\(/.test(line);
+      return /\$(?:executeRawUnsafe|queryRawUnsafe)\s*\(/.test(line);
     },
   },
   {
@@ -11392,6 +11469,8 @@ const RULES: PatternRule[] = [
       if (!/\bfrom\s+['"]next\//.test(ctx.fileContent) && !/\bnext\/navigation\b/.test(ctx.fileContent) && !/['"]use server['"]/.test(ctx.fileContent)) return false;
       // Must NOT be an Express/Fastify file
       if (/\bexpress\s*\(\)|\bfastify\s*\(|\bfrom\s+['"]express['"]|\bfrom\s+['"]fastify['"]/.test(ctx.fileContent)) return false;
+      // Skip config-based redirects (e.g., authOptions.pages.signIn)
+      if (/\bredirect\s*\(\s*(?:authOptions|config|settings|options)\s*\./.test(line)) return false;
       // redirect(req.query.url) or redirect(searchParams.get('redirect'))
       return /\bredirect\s*\(\s*(?:req\s*\.\s*(?:query|body)\s*\.\s*\w+|searchParams\s*\.\s*get\s*\()/.test(line);
     },
@@ -11507,6 +11586,8 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/dangerouslySetInnerHTML/.test(line)) return false;
+      // JSON.stringify() output is always safe — JSON cannot contain executable HTML
+      if (/JSON\s*\.\s*stringify\s*\(/.test(line)) return false;
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 3)).join('\n');
       return /\b(?:prisma|db|supabase|knex|pool|query|findOne|findFirst|findUnique)\b/.test(window) &&
@@ -19697,7 +19778,7 @@ const RULES: PatternRule[] = [
   {
     id: 'ON_DEMAND_REVALIDATION_NO_SECRET',
     category: 'Authorization',
-    description: 'On-demand ISR revalidation endpoint without secret validation — allows cache busting.',
+    description: 'On-demand ISR revalidation API endpoint (res.revalidate()) without secret validation — allows cache busting.',
     severity: 'high',
     fix_suggestion: 'Validate a shared secret in the revalidation API route: if (req.query.secret !== process.env.REVALIDATION_SECRET).',
     auto_fixable: false,
@@ -19705,7 +19786,12 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
-      if (!/revalidatePath\s*\(/.test(line) && !/revalidateTag\s*\(/.test(line)) return false;
+      // revalidatePath() and revalidateTag() are Next.js cache invalidation functions —
+      // they are NOT security-sensitive API endpoints. Only flag res.revalidate() which
+      // is the Pages Router on-demand ISR API endpoint that needs secret protection.
+      if (/\brevalidatePath\s*\(/.test(line) || /\brevalidateTag\s*\(/.test(line)) return false;
+      // Only fire for res.revalidate() — the actual ISR API endpoint
+      if (!/\bres\s*\.\s*revalidate\s*\(/.test(line)) return false;
       return !ctx.fileContent.includes('secret') && !ctx.fileContent.includes('REVALIDATION') &&
         !ctx.fileContent.includes('authorization') && !ctx.fileContent.includes('Bearer');
     },
@@ -19723,7 +19809,14 @@ const RULES: PatternRule[] = [
     detect: (line, ctx) => {
       if (!/cron/.test(ctx.filePath.toLowerCase())) return false;
       if (!/export\s+(?:async\s+)?function\s+(?:GET|POST)/.test(line)) return false;
-      return !ctx.fileContent.includes('CRON_SECRET') && !ctx.fileContent.includes('authorization');
+      // Check for various auth patterns: CRON_SECRET, authorization header, QStash signature verification
+      if (ctx.fileContent.includes('CRON_SECRET')) return false;
+      if (/\bauthorization\b/i.test(ctx.fileContent)) return false;
+      if (/\bverifyQstashSignature\b/.test(ctx.fileContent)) return false;
+      if (/\bverifySignature\b/.test(ctx.fileContent)) return false;
+      if (/\bAuthorization\b/.test(ctx.fileContent)) return false;
+      if (/\bBearer\b/.test(ctx.fileContent)) return false;
+      return true;
     },
   },
   {
@@ -19786,6 +19879,14 @@ const RULES: PatternRule[] = [
       if (!/['"]use server['"]/.test(ctx.fileContent)) return false;
       if (!/export\s+async\s+function\s+\w+/.test(line)) return false;
       const funcBody = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join('\n');
+      // Skip auth check for cache invalidation actions — these only bust cache, no data read/write
+      if (/\brevalidatePath\s*\(/.test(funcBody) || /\brevalidateTag\s*\(/.test(funcBody) || /\brevalidate\s*\(/.test(funcBody)) {
+        // Only skip if the action ONLY does revalidation (no DB access or data mutations)
+        if (!/\b(?:prisma|db|supabase|knex|pool|fetch|axios)\s*\./.test(funcBody) &&
+            !/\b(?:create|update|delete|insert|remove|save|destroy|upsert)\s*\(/.test(funcBody)) {
+          return false;
+        }
+      }
       return !/(auth|getServerSession|getSession|currentUser|requireAuth|clerk|getToken)\s*\(/.test(funcBody);
     },
   },
@@ -19999,6 +20100,12 @@ function getFileType(filePath: string): FileType | null {
 
 function scanFileContent(filePath: string, content: string): Finding[] {
   const findings: Finding[] = [];
+
+  // Skip Prisma schema files (.prisma) — not application code
+  if (isPrismaSchemaFile(filePath)) return findings;
+  // Skip Prisma migration files — auto-generated SQL, not user-authored
+  if (isPrismaMigrationFile(filePath)) return findings;
+
   const fileType = getFileType(filePath);
   if (!fileType) return findings;
 

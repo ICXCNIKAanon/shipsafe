@@ -2282,6 +2282,18 @@ async function scanFile(
         continue;
       }
 
+      // Skip database-password in files that HANDLE passwords as their core function
+      // (secret managers, vault integrations, credential helpers, password managers)
+      if (pattern.id === 'database-password') {
+        const lowerPath = filePath.toLowerCase();
+        if (
+          /(?:secret|credential|vault|password-manager|dynamic-secret)/.test(lowerPath) ||
+          /\bfrom\s+['"](?:@hashicorp\/vault|aws-secretsmanager|infisical)/.test(content)
+        ) {
+          continue;
+        }
+      }
+
       const match = pattern.regex.exec(line);
       if (!match) continue;
 

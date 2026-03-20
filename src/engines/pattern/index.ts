@@ -82,6 +82,22 @@ export async function runPatternEngine(options: PatternEngineOptions): Promise<S
     };
   }
 
+  // 3.5. Strip metadata from staged images before scanning (privacy protection)
+  if (scope === 'staged' && stagedFiles && stagedFiles.length > 0) {
+    try {
+      const { stripStagedImages, isSupported } = await import('@metastrip/hooks');
+      const imageFiles = stagedFiles.filter((f: string) => isSupported(f));
+      if (imageFiles.length > 0) {
+        const result = await stripStagedImages(imageFiles);
+        if (result && result.stripped > 0) {
+          console.log(`  MetaStrip: Stripped metadata from ${result.stripped} image${result.stripped === 1 ? '' : 's'} (zero quality loss)`);
+        }
+      }
+    } catch {
+      // @metastrip/hooks not available or failed — skip silently
+    }
+  }
+
   // 4. Run built-in scanners (always available — no external deps)
   const { scanSecrets } = await import('../builtin/secrets.js');
   const { scanPatterns } = await import('../builtin/patterns.js');

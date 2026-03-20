@@ -108,6 +108,45 @@ function isDocOrCommentExample(line: string): boolean {
   return false;
 }
 
+// ── Test / docs / i18n file detection ────────────────────────────────────────
+
+function isTestOrDocsFile(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return (
+    lower.includes('.test.') ||
+    lower.includes('.spec.') ||
+    lower.includes('__tests__') ||
+    lower.includes('/test/') ||
+    lower.includes('/tests/') ||
+    lower.includes('_test.py') ||
+    lower.includes('test_') ||
+    lower.endsWith('.test.ts') ||
+    lower.endsWith('.test.js') ||
+    lower.endsWith('.spec.ts') ||
+    lower.endsWith('.spec.js') ||
+    // Documentation directories and files
+    lower.includes('/docs/') ||
+    lower.includes('/docs_src/') ||
+    lower.includes('/documentation/') ||
+    lower.includes('/examples/') ||
+    lower.includes('/example/') ||
+    lower.endsWith('.md') ||
+    lower.endsWith('.mdx') ||
+    lower.endsWith('.rst') ||
+    // i18n / localization
+    lower.includes('/i18n/') ||
+    lower.includes('/locales/') ||
+    lower.includes('/translations/') ||
+    lower.includes('/lang/') ||
+    // Fixtures / mocks / seeds
+    lower.includes('/fixtures/') ||
+    lower.includes('/__fixtures__/') ||
+    lower.includes('/seeds/') ||
+    lower.includes('/mock/') ||
+    lower.includes('/mocks/')
+  );
+}
+
 // ── File filtering ─────────────────────────────────────────────────────────────
 
 const SKIP_DIRS = new Set([
@@ -2162,8 +2201,21 @@ async function scanFile(
   const fileName = basename(filePath);
   const isEnvFile = fileName.startsWith('.env');
   const isEnvExample = fileName === '.env.example' || fileName === '.env.sample';
+  const fileIsTestOrDocs = isTestOrDocsFile(filePath);
   const lines = content.split('\n');
   const findings: Finding[] = [];
+
+  // Generic pattern IDs that should be skipped in test/docs/i18n files
+  const SKIP_IN_TEST_DOCS = new Set([
+    'password-assignment-double-quote',
+    'password-assignment-single-quote',
+    'api-key-assignment-double-quote',
+    'api-key-assignment-single-quote',
+    'secret-assignment-double-quote',
+    'secret-assignment-single-quote',
+    'access-token-assignment-double-quote',
+    'access-token-assignment-single-quote',
+  ]);
 
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
@@ -2180,6 +2232,11 @@ async function scanFile(
         pattern.contextKeywords?.includes('.env') &&
         !isEnvFile
       ) {
+        continue;
+      }
+
+      // Skip generic secret patterns in test/docs/i18n files
+      if (fileIsTestOrDocs && SKIP_IN_TEST_DOCS.has(pattern.id)) {
         continue;
       }
 
@@ -2218,8 +2275,8 @@ async function scanFile(
         if (!hasContext) continue;
       }
 
-      // Downgrade severity for .env.example / .env.sample files
-      const effectiveSeverity: Severity = isEnvExample ? 'info' : pattern.severity;
+      // Downgrade severity for .env.example / .env.sample files and test/docs files
+      const effectiveSeverity: Severity = (isEnvExample || fileIsTestOrDocs) ? 'info' : pattern.severity;
 
       findings.push({
         id: `builtin_${pattern.id}_${lineIdx + 1}`,

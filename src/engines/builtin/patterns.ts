@@ -115,8 +115,49 @@ function isTestFile(filePath: string): boolean {
     lower.endsWith('.test.ts') ||
     lower.endsWith('.test.js') ||
     lower.endsWith('.spec.ts') ||
-    lower.endsWith('.spec.js')
+    lower.endsWith('.spec.js') ||
+    // Documentation directories and files
+    lower.includes('/docs/') ||
+    lower.includes('/docs_src/') ||
+    lower.includes('/documentation/') ||
+    lower.includes('/examples/') ||
+    lower.includes('/example/') ||
+    lower.endsWith('.md') ||
+    lower.endsWith('.mdx') ||
+    lower.endsWith('.rst') ||
+    // i18n / localization
+    lower.includes('/i18n/') ||
+    lower.includes('/locales/') ||
+    lower.includes('/translations/') ||
+    lower.includes('/lang/') ||
+    // Fixtures / mocks / seeds
+    lower.includes('/fixtures/') ||
+    lower.includes('/__fixtures__/') ||
+    lower.includes('/seeds/') ||
+    lower.includes('/mock/') ||
+    lower.includes('/mocks/') ||
+    // Benchmarks
+    lower.includes('/benchmarks/') ||
+    lower.includes('/benchmark/')
   );
+}
+
+// ── Helper: Framework library source detection ──
+// Detects if a file is part of a framework's own source code (not application code)
+
+function isFrameworkSource(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  // FastAPI framework source
+  if (/\/fastapi\/fastapi\//.test(lower)) return true;
+  // Flask framework source
+  if (/\/flask\/src\/flask\//.test(lower) || /\/flask\/flask\//.test(lower)) return true;
+  // Django framework source
+  if (/\/django\/django\//.test(lower)) return true;
+  // Express framework source
+  if (/\/express\/lib\//.test(lower)) return true;
+  // Hono framework source
+  if (/\/hono\/src\//.test(lower) && /\/hono\//.test(lower)) return true;
+  return false;
 }
 
 // ── Pattern Rules ──
@@ -1178,13 +1219,15 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
       const lower = line.toLowerCase();
       if (!/===/.test(line)) return false;
-      return (
-        (lower.includes('token') || lower.includes('hmac') || lower.includes('digest') || lower.includes('signature')) &&
-        !/timingSafeEqual/.test(line)
-      );
+      if (!(lower.includes('token') || lower.includes('hmac') || lower.includes('digest') || lower.includes('signature'))) return false;
+      if (/timingSafeEqual/.test(line)) return false;
+      // Check a wider window (10 lines before and after) for timingSafeEqual usage
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 10)).join('\n');
+      return !/timingSafeEqual/.test(window);
     },
   },
 
@@ -2294,7 +2337,25 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: false,
     skipTestFiles: true,
     detect: (line) => {
-      return /\bNEXT_PUBLIC_[A-Z_]*(?:SECRET|PRIVATE|PASSWORD|TOKEN|KEY|CREDENTIAL|AUTH)[A-Z_]*\b/.test(line);
+      if (!/\bNEXT_PUBLIC_[A-Z_]*(?:SECRET|PRIVATE|PASSWORD|TOKEN|KEY|CREDENTIAL|AUTH)[A-Z_]*\b/.test(line)) return false;
+      // Exclude known-public environment variables (publishable keys, URLs, etc.)
+      if (/\bNEXT_PUBLIC_SUPABASE_ANON_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_SUPABASE_URL\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_FIREBASE_AUTH_DOMAIN\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_FIREBASE_API_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_POSTHOG_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_SENTRY_AUTH_TOKEN\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_ALGOLIA_SEARCH_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_RECAPTCHA_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_RECAPTCHA_SITE_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_MAPBOX_TOKEN\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_GOOGLE_MAPS_KEY\b/.test(line)) return false;
+      // Publishable/public keys are intentionally client-side
+      if (/\bNEXT_PUBLIC_\w*PUBLISHABLE\w*\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_\w*PUBLIC_KEY\b/.test(line)) return false;
+      return true;
     },
   },
 
@@ -3811,6 +3872,10 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/\bredirect\s*\(/.test(line)) return false;
+      // Must be a Next.js file — check for next imports or Next.js patterns
+      if (!/\bfrom\s+['"]next\//.test(ctx.fileContent) && !/\bnext\/navigation\b/.test(ctx.fileContent) && !/\bnext\/headers\b/.test(ctx.fileContent) && !/['"]use server['"]/.test(ctx.fileContent)) return false;
+      // Must NOT be an Express/Fastify file
+      if (/\bexpress\s*\(\)|\bfastify\s*\(|\bfrom\s+['"]express['"]|\bfrom\s+['"]fastify['"]/.test(ctx.fileContent)) return false;
       // Must not be a hardcoded string
       if (/\bredirect\s*\(\s*['"`]\/[^'"$`]*['"`]\s*\)/.test(line)) return false;
       // Check if it uses user input
@@ -4848,7 +4913,17 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: false,
     skipTestFiles: true,
     detect: (line) => {
-      return /\bNEXT_PUBLIC_\w*(?:SECRET|PASSWORD|PRIVATE_KEY|ADMIN_KEY|DB_PASS|AUTH_KEY)\b/i.test(line);
+      if (!/\bNEXT_PUBLIC_\w*(?:SECRET|PASSWORD|PRIVATE_KEY|ADMIN_KEY|DB_PASS|AUTH_KEY)\b/i.test(line)) return false;
+      // Exclude known-public environment variables
+      if (/\bNEXT_PUBLIC_SUPABASE_ANON_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_SUPABASE_URL\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_FIREBASE_AUTH_DOMAIN\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_FIREBASE_API_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_\w*PUBLISHABLE\w*\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_\w*PUBLIC_KEY\b/.test(line)) return false;
+      return true;
     },
   },
   {
@@ -5479,8 +5554,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.py'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
       if (!/\bSECRET_KEY\s*=/.test(line)) return false;
+      if (isFrameworkSource(ctx.filePath)) return false;
       // Hardcoded if assigned a string literal, not os.environ or config call
       return /\bSECRET_KEY\s*=\s*['"`]/.test(line) && !/\bos\.environ\b/.test(line) && !/\bconfig\s*\(/.test(line);
     },
@@ -8190,8 +8266,13 @@ const RULES: PatternRule[] = [
     fileTypes: ['.py'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
-      return /\bDEBUG\s*=\s*True\b/.test(line);
+    detect: (line, ctx) => {
+      if (!/\bDEBUG\s*=\s*True\b/.test(line)) return false;
+      // Must be a Django settings file or Django project
+      const lowerPath = ctx.filePath.toLowerCase();
+      if (lowerPath.includes('settings') || lowerPath.includes('django')) return true;
+      // Check for Django imports in the file
+      return /\bfrom\s+django\b|\bimport\s+django\b|\bINSTALLED_APPS\b|\bMIDDLEWARE\b|\bALLOWED_HOSTS\b/.test(ctx.fileContent);
     },
   },
   {
@@ -8373,8 +8454,14 @@ const RULES: PatternRule[] = [
       if (!/\bawait\s+fetch\s*\(/.test(line)) return false;
       if (/\b(?:\.ok|\.status|response\.ok)\b/.test(line)) return false;
       const lineIdx = ctx.lineNumber - 1;
-      const nextLines = ctx.allLines.slice(lineIdx + 1, Math.min(ctx.allLines.length, lineIdx + 4)).join('\n');
-      return !/\b(?:\.ok|\.status|response\.ok|res\.ok)\b/.test(nextLines);
+      const nextLines = ctx.allLines.slice(lineIdx + 1, Math.min(ctx.allLines.length, lineIdx + 6)).join('\n');
+      if (/\b(?:\.ok|\.status|response\.ok|res\.ok)\b/.test(nextLines)) return false;
+      // Check for surrounding try/catch or .catch()
+      const beforeLines = ctx.allLines.slice(Math.max(0, lineIdx - 5), lineIdx).join('\n');
+      if (/\btry\s*\{/.test(beforeLines)) return false;
+      if (/\.catch\s*\(/.test(nextLines)) return false;
+      if (/\.catch\s*\(/.test(line)) return false;
+      return true;
     },
   },
 
@@ -10113,7 +10200,7 @@ const RULES: PatternRule[] = [
     category: 'Data Integrity',
     description:
       'Multiple sequential database write operations without a transaction — partial failures leave data inconsistent.',
-    severity: 'medium',
+    severity: 'info',
     fix_suggestion:
       'Wrap related writes in a transaction: await db.transaction(async (tx) => { ... }).',
     auto_fixable: false,
@@ -10671,9 +10758,12 @@ const RULES: PatternRule[] = [
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines.slice(lineIdx + 1, Math.min(ctx.allLines.length, lineIdx + 20)).join('\n');
       if (!new RegExp(`\\b${funcName}\\s*\\(`).test(window)) return false;
+      // Must accept user input (req, request, body, params, data, input, user)
+      const funcSignature = line;
+      if (!/\b(?:req|request|body|params|data|input|user|json|payload)\b/.test(funcSignature)) return false;
       // Check for depth/maxDepth parameter
-      return !/\b(?:depth|maxDepth|max_depth|level|maxLevel)\b/.test(line) &&
-        !/\b(?:depth|maxDepth|max_depth|level|maxLevel)\b/.test(window);
+      return !/\b(?:depth|maxDepth|max_depth|level|maxLevel|limit|maxRecursion)\b/.test(line) &&
+        !/\b(?:depth|maxDepth|max_depth|level|maxLevel|limit|maxRecursion)\b/.test(window);
     },
   },
   {
@@ -10903,7 +10993,11 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Must be a Next.js file — check for next imports or Next.js patterns
+      if (!/\bfrom\s+['"]next\//.test(ctx.fileContent) && !/\bnext\/navigation\b/.test(ctx.fileContent) && !/['"]use server['"]/.test(ctx.fileContent)) return false;
+      // Must NOT be an Express/Fastify file
+      if (/\bexpress\s*\(\)|\bfastify\s*\(|\bfrom\s+['"]express['"]|\bfrom\s+['"]fastify['"]/.test(ctx.fileContent)) return false;
       // redirect(req.query.url) or redirect(searchParams.get('redirect'))
       return /\bredirect\s*\(\s*(?:req\s*\.\s*(?:query|body)\s*\.\s*\w+|searchParams\s*\.\s*get\s*\()/.test(line);
     },
@@ -11651,8 +11745,12 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/\bDEBUG\s*=\s*True\b/.test(line)) return false;
-      // Only flag in settings files or if not from env var
-      return ctx.filePath.includes('settings') || /^\s*DEBUG\s*=\s*True\s*$/.test(line);
+      if (isFrameworkSource(ctx.filePath)) return false;
+      // Must be a Django settings file or Django project
+      const lowerPath = ctx.filePath.toLowerCase();
+      if (lowerPath.includes('settings') || lowerPath.includes('django')) return true;
+      // Check for Django markers in the file content
+      return /\bfrom\s+django\b|\bimport\s+django\b|\bINSTALLED_APPS\b|\bMIDDLEWARE\b|\bALLOWED_HOSTS\b/.test(ctx.fileContent);
     },
   },
   {
@@ -11795,6 +11893,10 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/\bFastAPI\s*\(\s*\)/.test(line)) return false;
+      // Skip framework source / docs / test / example directories
+      const lowerPath = ctx.filePath.toLowerCase();
+      if (/\/(docs_src|docs|tests|test|examples|example|fixtures)\//i.test(lowerPath)) return false;
+      if (isFrameworkSource(ctx.filePath)) return false;
       // Check the entire file for CORSMiddleware
       return !/\bCORSMiddleware\b/.test(ctx.fileContent);
     },
@@ -14441,13 +14543,21 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
-      // Detect self-referencing fields like: friends: [User]
-      if (!/\btype\s+(\w+)\b/.test(line)) return false;
-      const match = line.match(/\btype\s+(\w+)\b/);
+      // Only match inside GraphQL schema definitions (gql`...`, typeDefs, .graphql content)
+      // Must see gql tag, typeDefs, or buildSchema to confirm GraphQL context
+      if (!/\bgql\s*`|typeDefs|buildSchema|makeExecutableSchema|GraphQLObjectType/.test(ctx.fileContent)) return false;
+      // Must match a GraphQL type definition pattern: type TypeName {
+      if (!/^\s*type\s+(\w+)\s*\{/.test(line) && !/['"`]\s*type\s+(\w+)\s*\{/.test(line)) return false;
+      const match = line.match(/type\s+(\w+)\s*\{/) || line.match(/type\s+(\w+)\b/);
       if (!match) return false;
       const typeName = match[1];
+      // Skip built-in GraphQL types
+      if (['Query', 'Mutation', 'Subscription', 'String', 'Int', 'Float', 'Boolean', 'ID'].includes(typeName)) return false;
+      // Look for self-reference within the type's field block (next 20 lines)
       const nearby = ctx.allLines.slice(ctx.lineNumber, Math.min(ctx.allLines.length, ctx.lineNumber + 20)).join('\n');
-      return new RegExp(`\\b${typeName}\\b`).test(nearby) && !/\bdepthLimit\b/.test(ctx.fileContent);
+      // Must find the type name used as a field type (e.g., `friends: [User]` or `parent: User`)
+      const fieldRefPattern = new RegExp(`:\\s*\\[?${typeName}\\]?`);
+      return fieldRefPattern.test(nearby) && !/\bdepthLimit\b/.test(ctx.fileContent);
     },
   },
   {
@@ -15233,7 +15343,7 @@ const RULES: PatternRule[] = [
     id: 'BATCH_PRIVILEGE_ESCALATION',
     category: 'Access Control',
     description: 'Batch operation without per-item authorization — allows horizontal privilege escalation.',
-    severity: 'high',
+    severity: 'info',
     fix_suggestion: 'Check authorization for each item in batch operations, not just the batch as a whole.',
     auto_fixable: false,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
@@ -15989,18 +16099,38 @@ const RULES: PatternRule[] = [
   {
     id: 'MONITORING_BLIND_SPOT_ERROR',
     category: 'Monitoring',
-    description: 'Error handler/catch block without monitoring or alerting — silent failures.',
-    severity: 'medium',
-    fix_suggestion: 'Add monitoring/metrics emission in error handlers to detect failures.',
+    description: 'Empty catch block swallows errors silently — failures will go undetected.',
+    severity: 'low',
+    fix_suggestion: 'Add error logging or monitoring in catch blocks. At minimum, log the error.',
     auto_fixable: false,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
-      if (!/\bcatch\s*\(\s*(?:e|err|error)\s*\)\s*\{/.test(line)) return false;
-      const afterLines = ctx.allLines.slice(ctx.lineNumber, ctx.lineNumber + 5).join(' ');
-      return /\bconsole\.(?:log|error)\b/.test(afterLines) &&
-        !/\b(?:metrics|monitor|alert|sentry|datadog|newrelic|emit)\b/i.test(afterLines);
+      // Only flag truly empty catch blocks: catch (e) { }
+      if (!/\bcatch\s*\(\s*(?:e|err|error|_)?\s*\)\s*\{/.test(line)) return false;
+      const lineIdx = ctx.lineNumber - 1;
+      const afterLines = ctx.allLines.slice(lineIdx + 1, Math.min(ctx.allLines.length, lineIdx + 4));
+      // Check if the catch block is empty or only has whitespace before closing brace
+      const bodyBeforeClose = afterLines.join('\n');
+      const closingBraceMatch = bodyBeforeClose.match(/^(\s*)\}/m);
+      if (!closingBraceMatch) return false;
+      // If the closing brace is within 2 lines and nothing meaningful is between
+      const linesBeforeClose = bodyBeforeClose.split('\n');
+      for (let i = 0; i < linesBeforeClose.length; i++) {
+        const trimmed = linesBeforeClose[i].trim();
+        if (trimmed === '}') {
+          // Catch block closes here — check if everything before was empty/comments
+          const bodyLines = linesBeforeClose.slice(0, i);
+          const hasCode = bodyLines.some((l) => l.trim().length > 0 && !l.trim().startsWith('//'));
+          return !hasCode;
+        }
+        if (trimmed.length > 0 && !trimmed.startsWith('//')) {
+          // Non-empty, non-comment line found — not an empty catch
+          return false;
+        }
+      }
+      return false;
     },
   },
   {
@@ -16811,6 +16941,10 @@ const RULES: PatternRule[] = [
     detect: (line, ctx) => {
       if (!/\bsession\s*\[/.test(line)) return false;
       const allContent = ctx.fileContent;
+      // Must be a Flask file — check for Flask imports or Flask() instantiation
+      if (!/\bfrom\s+flask\b|\bimport\s+flask\b|\bFlask\s*\(/i.test(allContent)) return false;
+      // Must NOT be a Django file
+      if (/\bfrom\s+django\b|\bimport\s+django\b/.test(allContent)) return false;
       return !/secret_key\s*=|SECRET_KEY/.test(allContent);
     },
   },
@@ -16968,6 +17102,10 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/\bFastAPI\s*\(/.test(line)) return false;
+      // Skip framework source / docs / test / example directories
+      const lowerPath = ctx.filePath.toLowerCase();
+      if (/\/(docs_src|docs|tests|test|examples|example|fixtures)\//i.test(lowerPath)) return false;
+      if (isFrameworkSource(ctx.filePath)) return false;
       const allContent = ctx.fileContent;
       return !/TrustedHostMiddleware|HTTPSRedirectMiddleware/.test(allContent);
     },
@@ -17000,6 +17138,9 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/\bUploadFile\b/.test(line) && !/\bFile\s*\(/.test(line)) return false;
+      if (isFrameworkSource(ctx.filePath)) return false;
+      const lowerPath = ctx.filePath.toLowerCase();
+      if (/\/(docs_src|docs|tests|test|examples|example|fixtures)\//i.test(lowerPath)) return false;
       const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 2), Math.min(ctx.allLines.length, ctx.lineNumber + 15)).join(' ');
       return !/\.size|max_size|content_length|MAX_UPLOAD|size_limit/.test(nearby);
     },
@@ -18184,6 +18325,10 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line, ctx) => {
       if (!/FastAPI\s*\(/.test(line)) return false;
+      // Skip framework source / docs / test / example directories
+      const lowerPath = ctx.filePath.toLowerCase();
+      if (/\/(docs_src|docs|tests|test|examples|example|fixtures)\//i.test(lowerPath)) return false;
+      if (isFrameworkSource(ctx.filePath)) return false;
       return !ctx.fileContent.includes('TrustedHostMiddleware');
     },
   },
@@ -18777,7 +18922,7 @@ const RULES: PatternRule[] = [
     id: 'TS_UNKNOWN_NO_NARROWING',
     category: 'Type Safety',
     description: 'unknown type used but narrowed with "as" instead of type guard — unsafe type assertion.',
-    severity: 'medium',
+    severity: 'info',
     fix_suggestion: 'Use typeof/instanceof type guards or a validation library instead of type assertions.',
     auto_fixable: false,
     fileTypes: ['.ts', '.tsx'],
@@ -18992,8 +19137,12 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
-      if (!/export\s+(?:default\s+)?function\s+middleware/.test(line) && !/export\s+(?:const|async)/.test(line)) return false;
-      if (!/middleware/.test(ctx.filePath.toLowerCase())) return false;
+      // Must be specifically a Next.js middleware file (middleware.ts at project root or in src/)
+      const lowerPath = ctx.filePath.toLowerCase();
+      if (!/(?:^|\/)middleware\.[tj]sx?$/.test(lowerPath)) return false;
+      // Must have Next.js markers — NextRequest/NextResponse or next/server import
+      if (!/\bNextRequest\b|\bNextResponse\b|\bfrom\s+['"]next\/server['"]/.test(ctx.fileContent)) return false;
+      if (!/export\s+(?:default\s+)?function\s+middleware/.test(line)) return false;
       return !ctx.fileContent.includes('getToken') && !ctx.fileContent.includes('auth(') &&
         !ctx.fileContent.includes('session') && !ctx.fileContent.includes('jwt') &&
         !ctx.fileContent.includes('NextAuth') && !ctx.fileContent.includes('clerk');
@@ -19405,8 +19554,13 @@ function scanFileContent(filePath: string, content: string): Finding[] {
             auto_fixable: rule.auto_fixable,
           });
 
-          // Mark file-level rules so they only fire once
-          if (rule.id === 'CONFIG_NO_SECURITY_HEADERS') {
+          // Mark file-level rules so they only fire once per file
+          if (
+            rule.id === 'CONFIG_NO_SECURITY_HEADERS' ||
+            rule.id === 'FASTAPI_NO_CORS_MIDDLEWARE' ||
+            rule.id === 'FASTAPI_NO_MIDDLEWARE_STACK' ||
+            rule.id === 'FASTAPI_TRUSTED_HOST_MISSING'
+          ) {
             firedOnceRules.add(rule.id);
           }
         }

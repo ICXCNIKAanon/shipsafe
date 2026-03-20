@@ -21,6 +21,9 @@ afterAll(async () => {
 
 async function scanCode(code: string, filename = 'test.ts'): Promise<Finding[]> {
   const filePath = join(testDir, filename);
+  // Ensure parent directory exists for nested paths like 'docs/examples/demo.ts'
+  const parentDir = filePath.substring(0, filePath.lastIndexOf('/'));
+  await mkdir(parentDir, { recursive: true });
   await writeFile(filePath, code, 'utf-8');
   return scanPatterns(testDir, [filePath]);
 }
@@ -3110,5 +3113,232 @@ describe('Cycle 90: Python False Positive Hardening', () => {
       'transfer.py',
     );
     expect(hasRule(findings, 'FTPLIB_NO_TLS')).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════
+// Real-world False Positive Regression Tests
+// ════════════════════════════════════════════
+
+describe('Real-world false positive regressions', () => {
+  describe('GRAPHQL_CIRCULAR_REF should not fire on non-GraphQL code', () => {
+    it('does NOT fire on TypeScript import statements', async () => {
+      const findings = await scanCode(`
+import type { User } from './types';
+import { UserService } from './services';
+
+interface User {
+  id: string;
+  name: string;
+  friends: User[];
+}
+      `);
+      expect(hasRule(findings, 'GRAPHQL_CIRCULAR_REF')).toBe(false);
+    });
+
+    it('does NOT fire on TypeScript interface definitions', async () => {
+      const findings = await scanCode(`
+type TreeNode = {
+  value: string;
+  children: TreeNode[];
+};
+
+type LinkedList = {
+  data: number;
+  next: LinkedList | null;
+};
+      `);
+      expect(hasRule(findings, 'GRAPHQL_CIRCULAR_REF')).toBe(false);
+    });
+
+    it('does NOT fire on React component type definitions', async () => {
+      const findings = await scanCode(`
+type ComponentProps = {
+  title: string;
+  children: React.ReactNode;
+};
+
+type FormState = {
+  values: Record<string, string>;
+  errors: Record<string, string>;
+};
+      `);
+      expect(hasRule(findings, 'GRAPHQL_CIRCULAR_REF')).toBe(false);
+    });
+  });
+
+  describe('FastAPI rules should not fire in docs_src/', () => {
+    it('does NOT fire FASTAPI_NO_MIDDLEWARE_STACK in docs_src/', async () => {
+      const findings = await scanCode(
+        `from fastapi import FastAPI\n\napp = FastAPI()`,
+        'docs_src/first_steps/tutorial001.py',
+      );
+      expect(hasRule(findings, 'FASTAPI_NO_MIDDLEWARE_STACK')).toBe(false);
+    });
+
+    it('does NOT fire FASTAPI_TRUSTED_HOST_MISSING in tests/', async () => {
+      const findings = await scanCode(
+        `from fastapi import FastAPI\n\napp = FastAPI()`,
+        'tests/test_main.py',
+      );
+      expect(hasRule(findings, 'FASTAPI_TRUSTED_HOST_MISSING')).toBe(false);
+    });
+
+    it('does NOT fire FASTAPI_NO_CORS_MIDDLEWARE in examples/', async () => {
+      const findings = await scanCode(
+        `from fastapi import FastAPI\n\napp = FastAPI()`,
+        'examples/basic.py',
+      );
+      expect(hasRule(findings, 'FASTAPI_NO_CORS_MIDDLEWARE')).toBe(false);
+    });
+  });
+
+  describe('NEXT_PUBLIC_SECRET should not fire on publishable keys', () => {
+    it('does NOT fire on NEXT_PUBLIC_SUPABASE_ANON_KEY', async () => {
+      const findings = await scanCode(
+        `const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;`,
+      );
+      expect(hasRule(findings, 'NEXT_PUBLIC_SECRET')).toBe(false);
+    });
+
+    it('does NOT fire on NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY', async () => {
+      const findings = await scanCode(
+        `const stripeKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;`,
+      );
+      expect(hasRule(findings, 'NEXT_PUBLIC_SECRET')).toBe(false);
+    });
+
+    it('does NOT fire on NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', async () => {
+      const findings = await scanCode(
+        `const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;`,
+      );
+      expect(hasRule(findings, 'NEXT_PUBLIC_SECRET')).toBe(false);
+    });
+
+    it('still fires on genuinely secret NEXT_PUBLIC_ vars', async () => {
+      const findings = await scanCode(
+        `const secret = process.env.NEXT_PUBLIC_DATABASE_SECRET;`,
+      );
+      expect(hasRule(findings, 'NEXT_PUBLIC_SECRET')).toBe(true);
+    });
+  });
+
+  describe('Framework cross-fire prevention', () => {
+    it('FLASK_SESSION_COOKIE_NO_SIGNING does NOT fire in Django code', async () => {
+      const findings = await scanCode(
+        `from django.contrib.sessions.backends.db import SessionStore\n\ndef view(request):\n    session['user_id'] = request.user.id`,
+        'views.py',
+      );
+      expect(hasRule(findings, 'FLASK_SESSION_COOKIE_NO_SIGNING')).toBe(false);
+    });
+
+    it('NEXTJS_REDIRECT_USER_INPUT does NOT fire in Express code', async () => {
+      const findings = await scanCode(`
+import express from 'express';
+const app = express();
+app.get('/login', (req, res) => {
+  const url = req.query.redirect;
+  redirect(url);
+});
+      `);
+      expect(hasRule(findings, 'NEXTJS_REDIRECT_USER_INPUT')).toBe(false);
+    });
+
+    it('PYTHON_DJANGO_DEBUG does NOT fire in Flask code', async () => {
+      const findings = await scanCode(
+        `from flask import Flask\n\nDEBUG = True\napp = Flask(__name__)`,
+        'app.py',
+      );
+      expect(hasRule(findings, 'PYTHON_DJANGO_DEBUG')).toBe(false);
+    });
+  });
+
+  describe('FETCH_NO_ERROR_HANDLING respects try/catch', () => {
+    it('does NOT fire when fetch is inside try/catch', async () => {
+      const findings = await scanCode(`
+try {
+  const response = await fetch('/api/data');
+  const data = await response.json();
+} catch (error) {
+  console.error(error);
+}
+      `);
+      expect(hasRule(findings, 'FETCH_NO_ERROR_HANDLING')).toBe(false);
+    });
+  });
+
+  describe('TIMING_UNSAFE_COMPARISON respects nearby timingSafeEqual', () => {
+    it('does NOT fire when timingSafeEqual is used nearby', async () => {
+      const findings = await scanCode(`
+const crypto = require('crypto');
+function verifyToken(provided, stored) {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(stored);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+// Usage:
+const tokenMatch = token === storedToken;
+      `);
+      expect(hasRule(findings, 'TIMING_UNSAFE_COMPARISON')).toBe(false);
+    });
+  });
+
+  describe('MONITORING_BLIND_SPOT_ERROR only flags empty catch blocks', () => {
+    it('does NOT fire on catch blocks with console.error', async () => {
+      const findings = await scanCode(`
+try { await process(); } catch (err) {
+  console.error('Failed:', err);
+}
+      `);
+      expect(hasRule(findings, 'MONITORING_BLIND_SPOT_ERROR')).toBe(false);
+    });
+
+    it('fires on truly empty catch blocks', async () => {
+      const findings = await scanCode(`
+try { await process(); } catch (err) {
+}
+      `);
+      expect(hasRule(findings, 'MONITORING_BLIND_SPOT_ERROR')).toBe(true);
+    });
+  });
+
+  describe('RECURSIVE_NO_DEPTH_LIMIT requires user input', () => {
+    it('does NOT fire on utility recursive functions without user input', async () => {
+      const findings = await scanCode(`
+function flatten(arr) {
+  return arr.reduce((acc, item) =>
+    Array.isArray(item) ? acc.concat(flatten(item)) : acc.concat(item), []);
+}
+      `);
+      expect(hasRule(findings, 'RECURSIVE_NO_DEPTH_LIMIT')).toBe(false);
+    });
+  });
+
+  describe('isTestFile expanded coverage', () => {
+    it('skips files in i18n directory', async () => {
+      const findings = await scanCode(
+        `const password = "some-secret-value-123";`,
+        'src/i18n/en.ts',
+      );
+      // skipTestFiles rules should not fire
+      expect(hasRule(findings, 'AUTH_PLAINTEXT_PASSWORD_STORAGE')).toBe(false);
+    });
+
+    it('skips files in fixtures directory', async () => {
+      const findings = await scanCode(
+        `const apiKey = "sk-1234567890abcdef";`,
+        'tests/fixtures/data.ts',
+      );
+      expect(hasRule(findings, 'API_KEY_LITERAL_REACT')).toBe(false);
+    });
+
+    it('skips files in docs directory', async () => {
+      const findings = await scanCode(
+        `eval(userInput);`,
+        'docs/examples/demo.ts',
+      );
+      expect(hasRule(findings, 'EVAL_USER_INPUT')).toBe(false);
+    });
   });
 });

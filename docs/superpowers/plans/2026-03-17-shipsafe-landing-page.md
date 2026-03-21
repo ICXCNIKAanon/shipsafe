@@ -403,7 +403,7 @@ Centered section: H2 "Ready to ship safely?", subtitle, install command block wi
 
 - [ ] **Step 2: Build Footer component**
 
-Semantic `<footer>`. Left: sailboat logo + "Connect Holdings LLC · Built in San Juan, PR 🇵🇷". Right: links (Docs, GitHub, Twitter). Gold top border.
+Semantic `<footer>`. Left: sailboat logo + "ShipSafe · Built in San Juan, PR 🇵🇷". Right: links (Docs, GitHub, Twitter). Gold top border.
 
 - [ ] **Step 3: Add fade-up animation to FinalCTA**
 
@@ -530,13 +530,13 @@ git add -A && git commit -m "feat: assemble complete landing page with responsiv
 
 ```bash
 cd ~/shipsafe-site
-gh repo create jakewlittle-cs/shipsafe-site --private --source=. --push
+gh repo create ICXCNIKAanon/shipsafe-site --private --source=. --push
 ```
 
 - [ ] **Step 2: Verify repo exists and is private**
 
 ```bash
-gh repo view jakewlittle-cs/shipsafe-site --json isPrivate
+gh repo view ICXCNIKAanon/shipsafe-site --json isPrivate
 ```
 
 - [ ] **Step 3: Done**

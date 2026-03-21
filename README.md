@@ -4,7 +4,7 @@ Security scanning for developers who ship fast.
 
 [![npm version](https://img.shields.io/npm/v/@shipsafe/cli.svg)](https://www.npmjs.com/package/@shipsafe/cli)
 [![license](https://img.shields.io/badge/license-proprietary-blue.svg)](https://shipsafe.org)
-[![tests](https://img.shields.io/github/actions/workflow/status/jakewlittle-cs/shipsafe/ci.yml?label=tests)](https://github.com/jakewlittle-cs/shipsafe)
+[![tests](https://img.shields.io/github/actions/workflow/status/ICXCNIKAanon/shipsafe/ci.yml?label=tests)](https://github.com/ICXCNIKAanon/shipsafe)
 
 ## What it does
 
@@ -196,7 +196,7 @@ packages/
 
 ## License
 
-UNLICENSED -- proprietary software by Connect Holdings LLC.
+UNLICENSED -- proprietary software by ShipSafe.
 
 `@shipsafe/monitor` is MIT licensed.
 

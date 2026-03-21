@@ -104,7 +104,7 @@ shipsafe/
     "lint": "tsc --noEmit"
   },
   "keywords": ["security", "scanning", "mcp", "vibe-coding", "semgrep", "gitleaks"],
-  "author": "Connect Holdings LLC",
+  "author": "ShipSafe",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20"

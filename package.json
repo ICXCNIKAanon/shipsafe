@@ -19,7 +19,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakewlittle-cs/shipsafe.git"
+    "url": "git+https://github.com/ICXCNIKAanon/shipsafe.git"
   },
   "homepage": "https://shipsafe.org",
   "keywords": [
@@ -30,7 +30,10 @@
     "semgrep",
     "gitleaks"
   ],
-  "author": "Connect Holdings LLC",
+  "author": "ShipSafe",
+  "bugs": {
+    "url": "https://github.com/ICXCNIKAanon/shipsafe/issues"
+  },
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20"

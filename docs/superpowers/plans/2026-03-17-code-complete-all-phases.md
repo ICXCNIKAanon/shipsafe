@@ -1062,11 +1062,11 @@ Add/update these fields:
 {
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakewlittle-cs/shipsafe.git"
+    "url": "git+https://github.com/ICXCNIKAanon/shipsafe.git"
   },
   "homepage": "https://shipsafe.org",
   "bugs": {
-    "url": "https://github.com/jakewlittle-cs/shipsafe/issues"
+    "url": "https://github.com/ICXCNIKAanon/shipsafe/issues"
   },
   "files": [
     "dist/",
@@ -1090,12 +1090,12 @@ Add/update these fields:
 {
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakewlittle-cs/shipsafe.git",
+    "url": "git+https://github.com/ICXCNIKAanon/shipsafe.git",
     "directory": "packages/monitor"
   },
   "homepage": "https://shipsafe.org",
   "bugs": {
-    "url": "https://github.com/jakewlittle-cs/shipsafe/issues"
+    "url": "https://github.com/ICXCNIKAanon/shipsafe/issues"
   },
   "files": [
     "dist/",
@@ -1289,7 +1289,7 @@ export SHIPSAFE_API_URL=http://localhost:3747
 
 ## License
 
-UNLICENSED — Copyright Connect Holdings LLC
+UNLICENSED — Copyright ShipSafe
 ````
 
 - [ ] **Step 2: Commit**
@@ -1318,4 +1318,4 @@ Expected: Build succeeds
 ```bash
 cd ~/shipsafe && git push -u origin main
 ```
-Expected: All commits pushed to jakewlittle-cs/shipsafe (private repo)
+Expected: All commits pushed to ICXCNIKAanon/shipsafe (private repo)

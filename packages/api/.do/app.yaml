@@ -3,7 +3,7 @@ region: nyc
 services:
   - name: api
     github:
-      repo: jakewlittle-cs/shipsafe
+      repo: ICXCNIKAanon/shipsafe
       branch: main
       deploy_on_push: true
     source_dir: packages/api

@@ -128,7 +128,7 @@ Marketing landing page for shipsafe.org. Single-page, Shuttle.dev-level polish w
 ### 9. Footer
 - "Built in San Juan, PR 🇵🇷"
 - Links: Docs, GitHub, Twitter
-- © Connect Holdings LLC
+- © ShipSafe
 
 ---
 
@@ -219,7 +219,7 @@ const navBg = useTransform(scrollY, [0, 100], ["rgba(5,10,24,0)", "rgba(5,10,24,
 - **Animations:** Framer Motion 11
 - **Fonts:** `next/font/google` for Inter + Playfair Display (self-hosted, zero layout shift, `font-display: swap`)
 - **Hosting:** Vercel (or static export to any CDN)
-- **Repo:** Separate repo (`jakewlittle-cs/shipsafe-site`, private)
+- **Repo:** Separate repo (`ICXCNIKAanon/shipsafe-site`, private)
 
 ---
 

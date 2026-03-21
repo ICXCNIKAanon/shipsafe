@@ -19,12 +19,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jakewlittle-cs/shipsafe.git",
+    "url": "git+https://github.com/ICXCNIKAanon/shipsafe.git",
     "directory": "packages/monitor"
   },
   "homepage": "https://shipsafe.org",
   "keywords": ["monitoring", "error-tracking", "performance"],
-  "author": "Connect Holdings LLC",
+  "author": "ShipSafe",
   "license": "MIT",
   "devDependencies": {
     "typescript": "^5.7.0",

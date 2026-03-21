@@ -11,6 +11,7 @@ import { registerConfigCommand } from '../src/cli/config.js';
 import { registerInitCommand } from '../src/cli/init.js';
 import { registerBaselineCommand } from '../src/cli/baseline.js';
 import { registerScanEnvironmentCommand } from '../src/cli/scan-environment.js';
+import { registerAuditCommand } from '../src/cli/audit.js';
 
 const program = new Command();
 program
@@ -28,6 +29,7 @@ registerConfigCommand(program);
 registerInitCommand(program);
 registerBaselineCommand(program);
 registerScanEnvironmentCommand(program);
+registerAuditCommand(program);
 
 program
   .command('mcp-server')

@@ -398,7 +398,7 @@ function truncateEvidence(text: string, maxLen = 200): string {
   return text.slice(0, maxLen) + '...';
 }
 
-function runPatterns(
+export function runPatterns(
   content: string,
   patterns: ThreatPattern[],
   location: string,

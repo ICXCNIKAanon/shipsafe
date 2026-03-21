@@ -1,0 +1,6 @@
+# Exclude test corpus — contains intentional fake secrets for testing detection
+paths-ignore:
+  - tests/
+  - "**/*.test.ts"
+  - "**/*.test.js"
+  - "**/*.spec.ts"

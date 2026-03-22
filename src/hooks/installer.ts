@@ -69,13 +69,24 @@ async function getHooksDir(projectDir: string): Promise<string> {
   return path.join(gitDir, 'hooks');
 }
 
-export async function installHooks(projectDir?: string): Promise<void> {
+export interface InstallHooksOptions {
+  /** When true, only install the pre-commit hook; skip pre-push. Default: false (install both). */
+  commitOnly?: boolean;
+}
+
+export async function installHooks(projectDir?: string, options?: InstallHooksOptions): Promise<void> {
   const dir = projectDir ?? process.cwd();
   const hooksDir = await getHooksDir(dir);
+  const commitOnly = options?.commitOnly ?? false;
 
   await fs.mkdir(hooksDir, { recursive: true });
 
-  for (const hook of HOOKS) {
+  // Filter hooks based on options
+  const hooksToInstall = commitOnly
+    ? HOOKS.filter((h) => h.name !== 'pre-push')
+    : HOOKS;
+
+  for (const hook of hooksToInstall) {
     const hookPath = path.join(hooksDir, hook.name);
     const backupPath = path.join(hooksDir, `${hook.name}.pre-shipsafe`);
 

@@ -12,6 +12,123 @@ import type { Finding, Severity } from '../../types.js';
 import { loadIgnoreFilter } from './ignore.js';
 import { loadGitIgnoreFilter } from './gitignore.js';
 
+// ── Project-aware allowlist ─────────────────────────────────────────────────
+
+/**
+ * Well-known NEXT_PUBLIC_ env vars that are intentionally public.
+ * These are suppressed unconditionally (they are public keys by design).
+ */
+const ALWAYS_PUBLIC_NEXT_PUBLIC = new Set([
+  'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+  'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
+  'NEXT_PUBLIC_POSTHOG_KEY',
+]);
+
+/**
+ * NEXT_PUBLIC_SUPABASE_* patterns that are public by design when RLS is enabled.
+ * Suppressed only when the project depends on @supabase/supabase-js or @supabase/ssr.
+ */
+const SUPABASE_PUBLIC_PATTERNS = [
+  /\bNEXT_PUBLIC_SUPABASE_\w+\b/,
+];
+
+interface ProjectAllowlist {
+  suppressAllNextPublicSupabase: boolean;
+}
+
+/**
+ * Reads the project's package.json to detect framework dependencies
+ * and build a project-level allowlist for false positive suppression.
+ */
+async function buildProjectAllowlist(targetPath: string): Promise<ProjectAllowlist> {
+  const allowlist: ProjectAllowlist = {
+    suppressAllNextPublicSupabase: false,
+  };
+
+  try {
+    const pkgPath = join(targetPath, 'package.json');
+    const raw = await readFile(pkgPath, 'utf-8');
+    const pkg = JSON.parse(raw) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+    // Supabase projects: anon keys are public by design when RLS is enabled
+    if (allDeps['@supabase/supabase-js'] || allDeps['@supabase/ssr']) {
+      allowlist.suppressAllNextPublicSupabase = true;
+    }
+  } catch {
+    // No package.json or unreadable — no allowlist adjustments
+  }
+
+  return allowlist;
+}
+
+/**
+ * Check if a finding's matched line should be suppressed based on the project allowlist.
+ * Returns true if the finding should be suppressed (not reported).
+ */
+function isAllowlistedEnvVar(line: string, allowlist: ProjectAllowlist): boolean {
+  // Always suppress well-known public keys regardless of project deps
+  for (const name of ALWAYS_PUBLIC_NEXT_PUBLIC) {
+    if (line.includes(name)) return true;
+  }
+
+  // Suppress NEXT_PUBLIC_SUPABASE_* when project uses Supabase
+  if (allowlist.suppressAllNextPublicSupabase) {
+    for (const pattern of SUPABASE_PUBLIC_PATTERNS) {
+      if (pattern.test(line)) return true;
+    }
+  }
+
+  return false;
+}
+
+// ── Demo / default password detection ───────────────────────────────────────
+
+/**
+ * Common demo/default passwords. When a detected password matches one of these,
+ * severity is downgraded from critical/high to medium.
+ */
+const DEMO_PASSWORDS = new Set([
+  'password',
+  'password123',
+  'pass123',
+  'admin',
+  'admin123',
+  'root',
+  'test',
+  'test123',
+  'secret',
+  'changeme',
+  'default',
+  'demo',
+  'example',
+]);
+
+/**
+ * Checks if a password value looks like a demo/default/weak placeholder.
+ * - Exact match against known demo passwords (case-insensitive)
+ * - Fewer than 8 characters
+ * - All the same character (e.g., "aaaaaa", "111111")
+ */
+function isDemoPassword(value: string): boolean {
+  const trimmed = value.trim().replace(/['"` ]/g, '');
+  if (trimmed.length === 0) return false;
+
+  // Known demo passwords
+  if (DEMO_PASSWORDS.has(trimmed.toLowerCase())) return true;
+
+  // Short passwords (fewer than 8 chars)
+  if (trimmed.length < 8) return true;
+
+  // All same character (e.g., "aaaaaa", "111111")
+  if (new Set(trimmed).size === 1) return true;
+
+  return false;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface SecretPattern {
@@ -2151,6 +2268,9 @@ export async function scanSecrets(
   targetPath: string,
   files?: string[],
 ): Promise<Finding[]> {
+  // 0. Build project-aware allowlist from package.json
+  const allowlist = await buildProjectAllowlist(targetPath);
+
   // 1. Determine file list
   let discovered: string[];
   if (files && files.length > 0) {
@@ -2179,7 +2299,7 @@ export async function scanSecrets(
   for (let i = 0; i < filesToScan.length; i += BATCH_SIZE) {
     const batch = filesToScan.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(
-      batch.map((filePath) => scanFile(filePath, targetPath)),
+      batch.map((filePath) => scanFile(filePath, targetPath, allowlist)),
     );
     for (const result of batchResults) {
       findings.push(...result);
@@ -2214,6 +2334,7 @@ export async function scanSecrets(
 async function scanFile(
   filePath: string,
   basePath: string,
+  allowlist?: ProjectAllowlist,
 ): Promise<Finding[]> {
   // Check file size — skip files > 1MB
   let fileStat;
@@ -2305,6 +2426,11 @@ async function scanFile(
       // Extract the captured group (secret value) or the full match
       const secretValue = match[1] ?? match[0];
 
+      // Project-aware allowlist: suppress NEXT_PUBLIC_ false positives
+      if (allowlist && isAllowlistedEnvVar(line, allowlist)) {
+        continue;
+      }
+
       // Skip large base64 blobs in font/data JSON files (not real tokens)
       if (fileIsFontData && isLargeBase64Blob(secretValue)) {
         continue;
@@ -2358,7 +2484,22 @@ async function scanFile(
       }
 
       // Downgrade severity for .env.example / .env.sample files and test/docs files
-      const effectiveSeverity: Severity = (isEnvExample || fileIsTestOrDocs) ? 'info' : pattern.severity;
+      let effectiveSeverity: Severity = (isEnvExample || fileIsTestOrDocs) ? 'info' : pattern.severity;
+      let effectiveDescription = isEnvExample
+        ? `${pattern.description} (in example file — likely placeholder)`
+        : pattern.description;
+
+      // Demo/default password severity downgrade
+      if (
+        (pattern.type === 'hardcoded_password' || pattern.type === 'database_password' || pattern.type === 'pkcs12_password') &&
+        isDemoPassword(secretValue) &&
+        effectiveSeverity !== 'info' // don't downgrade below info
+      ) {
+        if (effectiveSeverity === 'critical' || effectiveSeverity === 'high') {
+          effectiveSeverity = 'medium';
+        }
+        effectiveDescription += ' \u2014 appears to be a demo/default password. Ensure this is not used in production.';
+      }
 
       findings.push({
         id: `builtin_${pattern.id}_${lineIdx + 1}`,
@@ -2367,9 +2508,7 @@ async function scanFile(
         type: pattern.type,
         file: relativePath,
         line: lineIdx + 1,
-        description: isEnvExample
-          ? `${pattern.description} (in example file — likely placeholder)`
-          : pattern.description,
+        description: effectiveDescription,
         fix_suggestion:
           'Move this secret to an environment variable or secrets manager. Never commit secrets to source control.',
         auto_fixable: pattern.autoFixable,

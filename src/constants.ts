@@ -43,6 +43,7 @@ export const SEVERITY_ORDER: Record<string, number> = {
 export const DEFAULT_CONFIG: {
   monitoring: { enabled: boolean; error_sample_rate: number; performance_sample_rate: number };
   scan: { ignore_paths: string[]; ignore_rules: string[]; severity_threshold: string };
+  hooks: { prePush: boolean };
 } = {
   monitoring: {
     enabled: true,
@@ -53,5 +54,8 @@ export const DEFAULT_CONFIG: {
     ignore_paths: ['node_modules', 'dist', '.git', 'coverage'],
     ignore_rules: [],
     severity_threshold: 'high',
+  },
+  hooks: {
+    prePush: true,
   },
 };

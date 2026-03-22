@@ -45,6 +45,10 @@ export interface ShipSafeConfig {
     ignore_rules: string[];
     severity_threshold: Severity;
   };
+  hooks?: {
+    /** Whether to install the pre-push hook. Default: true. */
+    prePush: boolean;
+  };
 }
 
 export interface ProjectStatus {

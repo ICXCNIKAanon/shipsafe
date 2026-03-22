@@ -12,6 +12,78 @@ import { loadIgnoreFilter, type IgnoreFilter } from './ignore.js';
 import { loadGitIgnoreFilter } from './gitignore.js';
 import { getAstContext, clearAstCache, type AstContext } from './ast-context.js';
 
+// ── Project-aware allowlist for NEXT_PUBLIC_ suppression ────────────────────
+
+interface PatternProjectAllowlist {
+  suppressAllNextPublicSupabase: boolean;
+  hasClerk: boolean;
+  hasStripe: boolean;
+  hasPosthog: boolean;
+}
+
+/**
+ * Reads the project's package.json to detect framework dependencies
+ * and determine which NEXT_PUBLIC_ vars should be automatically suppressed.
+ */
+async function buildPatternProjectAllowlist(targetPath: string): Promise<PatternProjectAllowlist> {
+  const allowlist: PatternProjectAllowlist = {
+    suppressAllNextPublicSupabase: false,
+    hasClerk: false,
+    hasStripe: false,
+    hasPosthog: false,
+  };
+
+  try {
+    const pkgPath = join(targetPath, 'package.json');
+    const raw = await readFile(pkgPath, 'utf-8');
+    const pkg = JSON.parse(raw) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+    if (allDeps['@supabase/supabase-js'] || allDeps['@supabase/ssr']) {
+      allowlist.suppressAllNextPublicSupabase = true;
+    }
+    if (allDeps['@clerk/nextjs'] || allDeps['@clerk/clerk-react'] || allDeps['@clerk/clerk-js']) {
+      allowlist.hasClerk = true;
+    }
+    if (allDeps['@stripe/stripe-js'] || allDeps['stripe']) {
+      allowlist.hasStripe = true;
+    }
+    if (allDeps['posthog-js'] || allDeps['posthog-node']) {
+      allowlist.hasPosthog = true;
+    }
+  } catch {
+    // No package.json or unreadable
+  }
+
+  return allowlist;
+}
+
+/**
+ * Check if a NEXT_PUBLIC_ finding should be suppressed based on project deps.
+ */
+function shouldSuppressNextPublicFinding(line: string, allowlist: PatternProjectAllowlist): boolean {
+  // Supabase: suppress ALL NEXT_PUBLIC_SUPABASE_* when project uses Supabase
+  if (allowlist.suppressAllNextPublicSupabase && /\bNEXT_PUBLIC_SUPABASE_\w+\b/.test(line)) {
+    return true;
+  }
+  // Clerk: suppress NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY when project uses Clerk
+  if (allowlist.hasClerk && /\bNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\b/.test(line)) {
+    return true;
+  }
+  // Stripe: suppress NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY when project uses Stripe
+  if (allowlist.hasStripe && /\bNEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY\b/.test(line)) {
+    return true;
+  }
+  // PostHog: suppress NEXT_PUBLIC_POSTHOG_KEY when project uses PostHog
+  if (allowlist.hasPosthog && /\bNEXT_PUBLIC_POSTHOG_KEY\b/.test(line)) {
+    return true;
+  }
+  return false;
+}
+
 // ── Types ──
 
 type FileType = '.ts' | '.tsx' | '.js' | '.jsx' | '.py';
@@ -20299,6 +20371,9 @@ export async function scanPatterns(
 ): Promise<Finding[]> {
   const discovered = files ?? (await discoverFiles(targetPath));
 
+  // Build project-aware allowlist from package.json
+  const allowlist = await buildPatternProjectAllowlist(targetPath);
+
   // Apply .shipsafeignore filter
   const ignoreFilter = await loadIgnoreFilter(resolve(targetPath));
 
@@ -20333,13 +20408,50 @@ export async function scanPatterns(
     }
   }
 
+  // Post-scan: suppress NEXT_PUBLIC_ false positives based on project dependencies
+  const NEXT_PUBLIC_RULE_IDS = new Set(['NEXT_PUBLIC_SECRET', 'NEXT_PUBLIC_SECRET_NAME']);
+  const filtered = allFindings.filter((f) => {
+    if (!NEXT_PUBLIC_RULE_IDS.has(f.id)) return true;
+    // Read the line from file to check against allowlist
+    // Since we already have the finding description, check the description for pattern names
+    // But we need the actual line content; use a simpler heuristic based on the finding description
+    // The detect functions already exclude known public keys, so here we only need to suppress
+    // any remaining NEXT_PUBLIC_SUPABASE_* when project uses Supabase
+    if (f.description.includes('NEXT_PUBLIC_')) {
+      // Re-read file content is too expensive; instead use the finding's metadata
+      // The detect functions use the line directly — we store a note in the type field
+      // Better: just check if the file line matches known patterns
+      return true; // Let per-file filtering below handle it
+    }
+    return true;
+  });
+
+  // More precise filtering: re-check NEXT_PUBLIC_ findings against the project allowlist
+  const finalFindings: Finding[] = [];
+  for (const finding of filtered) {
+    if (NEXT_PUBLIC_RULE_IDS.has(finding.id)) {
+      // Read the specific line from the file to check against allowlist
+      try {
+        const content = await readFile(finding.file, 'utf-8');
+        const lines = content.split('\n');
+        const line = lines[finding.line - 1] ?? '';
+        if (shouldSuppressNextPublicFinding(line, allowlist)) {
+          continue; // Suppress this finding
+        }
+      } catch {
+        // Can't re-read file; keep the finding
+      }
+    }
+    finalFindings.push(finding);
+  }
+
   // Sort by severity: critical > high > medium > low > info
-  allFindings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+  finalFindings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
 
   // Clear AST cache after scan to free memory
   clearAstCache();
 
-  return allFindings;
+  return finalFindings;
 }
 
 /**

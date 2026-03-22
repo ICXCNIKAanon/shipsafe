@@ -68,7 +68,7 @@ describe('handleSetupAction', () => {
   it('calls installHooks', async () => {
     await handleSetupAction({});
 
-    expect(mockedInstallHooks).toHaveBeenCalledWith(tmpDir);
+    expect(mockedInstallHooks).toHaveBeenCalledWith(tmpDir, { commitOnly: undefined });
   });
 
   it('calls injectClaudeMd', async () => {

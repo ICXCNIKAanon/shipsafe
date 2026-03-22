@@ -4,11 +4,10 @@ Security scanning for developers who ship fast.
 
 [![npm version](https://img.shields.io/npm/v/@shipsafe/cli.svg)](https://www.npmjs.com/package/@shipsafe/cli)
 [![license](https://img.shields.io/badge/license-proprietary-blue.svg)](https://shipsafe.org)
-[![tests](https://img.shields.io/github/actions/workflow/status/ICXCNIKAanon/shipsafe/ci.yml?label=tests)](https://github.com/ICXCNIKAanon/shipsafe)
 
 ## What it does
 
-ShipSafe catches vulnerabilities, hardcoded secrets, and dangerous dependencies before they reach production. It ships with 258 built-in detection rules, requires zero configuration, and works with Claude Code, Cursor, Windsurf, Copilot, Cline, and any AI coding tool. Every scan runs in pure TypeScript with no external binary dependencies.
+ShipSafe catches vulnerabilities, hardcoded secrets, and dangerous dependencies before they reach production. It ships with 1,266 detection rules (1,062 vulnerability + 174 secret + 30 environment threat patterns), requires zero configuration, and works with Claude Code, Cursor, Windsurf, Copilot, Cline, and any AI coding tool. Every scan runs in pure TypeScript with no external binary dependencies.
 
 ## Quick Start
 
@@ -20,8 +19,9 @@ That's it. One command installs the CLI, the MCP server for AI assistants, and a
 
 ## What it catches
 
-- **84 vulnerability patterns** -- SQL injection, prompt injection, XSS, command injection, path traversal, SSRF, CSRF, prototype pollution, insecure cryptography, insecure deserialization, authentication issues, and more
+- **1,062 vulnerability patterns** -- SQL injection, prompt injection, XSS, command injection, path traversal, SSRF, CSRF, prototype pollution, insecure cryptography, insecure deserialization, authentication issues, and more
 - **174 secret patterns** -- AWS keys, GCP service accounts, Azure tokens, GitHub PATs, Stripe keys, database URLs, JWTs, private keys, OAuth secrets, and dozens more -- with Shannon entropy validation to reduce false positives
+- **30 environment threat patterns** -- prompt injection in CLAUDE.md, malicious MCP server configs, dangerous hooks, skill file manipulation, obfuscated instructions, credential theft, reverse shells
 - **Dependency vulnerabilities** -- deprecated packages, known CVEs, typosquatting detection, maintenance status checks
 
 ## How it works
@@ -45,6 +45,8 @@ ShipSafe protects your code through three layers:
 | `shipsafe activate <key>` | Activate a Pro or Team license key |
 | `shipsafe config list` | View current configuration |
 | `shipsafe config set <key> <value>` | Set a config value. Add `--global` for user-wide settings |
+| `shipsafe audit <url>` | Audit a remote GitHub/GitLab repo before installing. Checks for vulnerabilities, secrets, malicious patterns, obfuscation, postinstall threats, and environment risks. Options: `--json` |
+| `shipsafe scan-environment` | Scan Claude Code environment for malicious MCP servers, hooks, skills, and prompt injection in CLAUDE.md. Options: `--json` |
 | `shipsafe status` | Show project security status, hook state, and available engines |
 | `shipsafe connect` | Connect project to ShipSafe cloud for monitoring |
 | `shipsafe upload-sourcemaps` | Upload source maps for production error resolution |

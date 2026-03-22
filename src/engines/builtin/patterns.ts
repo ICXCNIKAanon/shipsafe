@@ -11,6 +11,7 @@ import type { Finding, Severity } from '../../types.js';
 import { loadIgnoreFilter, type IgnoreFilter } from './ignore.js';
 import { loadGitIgnoreFilter } from './gitignore.js';
 import { getAstContext, clearAstCache, type AstContext } from './ast-context.js';
+import { extractImportContext, type ImportContext } from './import-context.js';
 
 // ── Project-aware allowlist for NEXT_PUBLIC_ suppression ────────────────────
 
@@ -116,6 +117,7 @@ interface LineContext {
   fileContent: string;
   allLines: string[];
   isTestFile: boolean;
+  importContext?: ImportContext;
 }
 
 // ── Ignored directories and file patterns ──
@@ -724,7 +726,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Suppress if the file imports a sanitization library (DOMPurify, sanitize-html, etc.)
+      if (ctx.importContext?.hasSanitizationImport) return false;
       if (!/dangerouslySetInnerHTML\s*=/.test(line)) return false;
       // JSON.stringify() output is always safe — JSON cannot contain executable HTML
       if (/JSON\s*\.\s*stringify\s*\(/.test(line)) return false;
@@ -1234,7 +1238,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Suppress if the file imports an auth library (passport, clerk, next-auth, etc.)
+      if (ctx.importContext?.hasAuthImport) return false;
       // Match route definitions like app.get("/api/admin/...", handler) without auth middleware
       if (!/\b(?:app|router)\s*\.\s*(?:get|post|put|patch|delete)\s*\(/.test(line)) return false;
       // Check for sensitive route patterns
@@ -1407,6 +1413,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Suppress if the file imports a rate limiting library
+      if (ctx.importContext?.hasRateLimitImport) return false;
       // Match route definitions for auth-related endpoints
       if (!/\b(?:app|router)\s*\.\s*(?:post|put)\s*\(\s*['"]\/(?:api\/)?(?:auth\/)?(?:login|signin|register|signup|reset-password|forgot-password|verify)\b/.test(line)) {
         return false;
@@ -1563,6 +1571,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (_line, ctx) => {
+      // Suppress if the file imports helmet
+      if (ctx.importContext?.hasHelmetImport) return false;
       // Only trigger once per file, on the line where express() is called
       if (!/\bexpress\s*\(\s*\)/.test(_line)) return false;
       // Check if helmet is used anywhere in the file
@@ -2344,6 +2354,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Suppress if the file imports a CSRF library
+      if (ctx.importContext?.hasCSRFImport) return false;
       // Only fire on the first POST/PUT/DELETE route definition in the file
       if (!/\b(?:app|router)\s*\.\s*(?:post|put|delete)\s*\(/.test(line)) return false;
       // Check if any CSRF middleware exists in the file
@@ -2585,6 +2597,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Suppress if the file imports an auth library
+      if (ctx.importContext?.hasAuthImport) return false;
       // Match export default function handler pattern
       if (!/\bexport\s+default\s+(?:async\s+)?function\s+handler\b/.test(line)) return false;
       // Check entire file for auth checks
@@ -5762,6 +5776,8 @@ const RULES: PatternRule[] = [
       if (!/\b(?:checkout\.session\.completed|payment_intent\.succeeded|invoice\.paid|customer\.subscription)\b/.test(line)) return false;
       // If the file already calls constructEvent or webhooks.constructEvent anywhere, the signature is verified
       if (/\b(?:constructEvent|webhooks\.constructEvent)\b/.test(ctx.fileContent)) return false;
+      // Redundant safety: if stripe is imported and constructEvent is used, suppress
+      if (ctx.importContext?.hasStripeImport && /\bconstructEvent\b/.test(ctx.fileContent)) return false;
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines.slice(Math.max(0, lineIdx - 10), Math.min(ctx.allLines.length, lineIdx + 5)).join('\n');
       return !/\b(?:constructEvent|verifyWebhookSignature|stripe-signature|webhook_secret)\b/i.test(window);
@@ -8697,7 +8713,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Suppress if the file imports a sanitization library
+      if (ctx.importContext?.hasSanitizationImport) return false;
       if (!/\bdangerouslySetInnerHTML\b/.test(line)) return false;
       // Skip when the line already uses a known sanitization function
       if (/\b(?:DOMPurify|sanitize|purify|dompurify|xss)\b/i.test(line)) return false;
@@ -20005,6 +20023,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Suppress if the file imports an auth library
+      if (ctx.importContext?.hasAuthImport) return false;
       if (!/['"]use server['"]/.test(ctx.fileContent)) return false;
       if (!/export\s+async\s+function\s+\w+/.test(line)) return false;
       const funcBody = ctx.allLines.slice(ctx.lineNumber - 1, ctx.lineNumber + 10).join('\n');
@@ -20250,12 +20270,16 @@ async function scanFileContent(filePath: string, content: string): Promise<Findi
 
   if (applicableRules.length === 0) return findings;
 
+  // Extract import context once per file for FP reduction
+  const importCtx = extractImportContext(content, filePath);
+
   const context: LineContext = {
     filePath,
     lineNumber: 0,
     fileContent: content,
     allLines: lines,
     isTestFile: fileIsTest,
+    importContext: importCtx,
   };
 
   // Track which rules have already flagged multi-line or file-level detections

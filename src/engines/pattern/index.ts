@@ -153,6 +153,67 @@ export async function runPatternEngine(options: PatternEngineOptions): Promise<S
     }
   }
 
+  // 5d. Call map post-filter (only for full scans — too slow for staged)
+  if (scope === 'all') {
+    try {
+      const { buildCallMapWithTimeout, findClosestFunctionKey } = await import('../builtin/call-map.js');
+      const callMap = await buildCallMapWithTimeout(targetPath, undefined, 5000);
+
+      if (callMap) {
+        // Rule IDs to check with call map
+        const AUTH_RULES = new Set([
+          'AUTH_MISSING_AUTH_MIDDLEWARE',
+          'NEXT_API_NO_AUTH',
+          'NEXT_SERVER_ACTION_NO_AUTH',
+        ]);
+        const SQL_RULES = new Set([
+          'SQL_INJECTION_CONCAT',
+          'SQL_INJECTION_TEMPLATE',
+          'SQL_INJECTION_FSTRING',
+          'SQL_INJECTION_FORMAT',
+        ]);
+        const XSS_RULES = new Set([
+          'XSS_DANGEROUSLY_SET_INNERHTML',
+          'XSS_EVAL',
+          'XSS_UNESCAPED_TEMPLATE',
+          'REACT_DANGEROUSLYSETINNERHTML_VARIABLE',
+          'DOM_XSS_INNERHTML_ASSIGN',
+        ]);
+
+        // Filter findings in-place
+        const filteredFindings: Finding[] = [];
+        for (const finding of findings) {
+          const funcKey = findClosestFunctionKey(callMap, finding.file, finding.line);
+
+          if (funcKey) {
+            // AUTH rules: suppress if called from auth context
+            if (AUTH_RULES.has(finding.id) && callMap.isCalledFromAuthContext(funcKey)) {
+              continue; // Suppress — auth is in the call chain
+            }
+
+            // SQL rules: downgrade to info if validation is in call chain
+            if (SQL_RULES.has(finding.id) && callMap.hasValidationInCallChain(funcKey)) {
+              finding.severity = 'info';
+            }
+
+            // XSS rules: suppress if validation is in call chain
+            if (XSS_RULES.has(finding.id) && callMap.hasValidationInCallChain(funcKey)) {
+              continue; // Suppress — validation/sanitization is in the call chain
+            }
+          }
+
+          filteredFindings.push(finding);
+        }
+
+        // Replace findings array
+        findings.length = 0;
+        findings.push(...filteredFindings);
+      }
+    } catch {
+      // Call map failure is non-fatal — fall back to pattern-only results
+    }
+  }
+
   // 6. Sort findings by severity (critical first)
   findings.sort((a, b) => {
     const orderA = SEVERITY_ORDER[a.severity] ?? 999;

@@ -1,0 +1,15 @@
+Copyright (c) 2026 ShipSafe. All rights reserved.
+
+This software is proprietary and source-available. You may view and fork
+this repository for personal evaluation purposes only.
+
+You MAY NOT:
+- Use this software commercially without a valid license
+- Redistribute, sublicense, or sell copies of this software
+- Modify and distribute derivative works
+- Use the source code in competing products
+
+For licensing inquiries: hello@shipsafe.org
+For the free tier: npm install -g @shipsafe/cli
+
+The @shipsafe/monitor package is separately licensed under MIT.

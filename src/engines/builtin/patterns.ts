@@ -197,6 +197,16 @@ function isTestFile(filePath: string): boolean {
     lower.endsWith('.test.js') ||
     lower.endsWith('.spec.ts') ||
     lower.endsWith('.spec.js') ||
+    // Playwright / Cypress / E2E test directories
+    lower.includes('/playwright/') ||
+    lower.includes('/cypress/') ||
+    lower.includes('/e2e/') ||
+    lower.includes('/__e2e__/') ||
+    // Storybook stories
+    lower.endsWith('.stories.ts') ||
+    lower.endsWith('.stories.tsx') ||
+    lower.endsWith('.stories.js') ||
+    lower.endsWith('.stories.jsx') ||
     // Documentation directories and files
     lower.includes('/docs/') ||
     lower.includes('/docs_src/') ||
@@ -617,7 +627,12 @@ const RULES: PatternRule[] = [
       if (/\$(?:queryRaw|executeRaw)\s*`/.test(line)) return false;
       // Skip safe Prisma ORM operations (e.g., prisma.user.findMany())
       if (isPrismaSafeOrmCall(line)) return false;
-      return /`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{[^}]+\}[^`]*`/i.test(line);
+      // Must contain a SQL keyword AND interpolation in a template literal
+      if (!/`(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b[^`]*\$\{[^}]+\}[^`]*`/i.test(line)) return false;
+      // Require actual SQL structural patterns — just having "SELECT" in a template literal
+      // is not enough (e.g., `select-filter-${id}` is a DOM selector, not SQL).
+      // The template must contain SQL structural keywords that indicate real SQL syntax.
+      return /\b(?:SELECT\b[^`]*\bFROM\b|INSERT\s+INTO\b|UPDATE\b[^`]*\bSET\b|DELETE\s+FROM\b|WHERE\b|JOIN\b|VALUES\b|ORDER\s+BY\b|GROUP\s+BY\b)\b/i.test(line);
     },
     astCheck: (_line, _context, ast) => {
       // Suppress if this is a tagged template literal (sql`...`, prisma.$queryRaw`...`, etc.)
@@ -732,6 +747,21 @@ const RULES: PatternRule[] = [
       if (!/dangerouslySetInnerHTML\s*=/.test(line)) return false;
       // JSON.stringify() output is always safe — JSON cannot contain executable HTML
       if (/JSON\s*\.\s*stringify\s*\(/.test(line)) return false;
+      // Variable name or value contains safety-indicating words
+      if (/\b(?:safe|sanitized|cleaned|purified|escaped)\w*\b/i.test(line)) return false;
+      // Value comes from a function whose name contains safety words
+      const htmlValueMatch = line.match(/__html\s*:\s*(.+?)(?:\}\}|$)/);
+      if (htmlValueMatch) {
+        const htmlValue = htmlValueMatch[1];
+        if (/\b(?:safe|sanitize|purify|escape|clean|encode)\w*\s*\(/i.test(htmlValue)) return false;
+      }
+      // Check surrounding lines for safety comments or lint-disable directives
+      const lineIdx = ctx.lineNumber - 1;
+      const surroundingStart = Math.max(0, lineIdx - 3);
+      const surroundingEnd = Math.min(ctx.allLines.length, lineIdx + 4);
+      const surroundingLines = ctx.allLines.slice(surroundingStart, surroundingEnd).join('\n');
+      if (/(?:biome-ignore|eslint-disable)/.test(surroundingLines)) return false;
+      if (/\/[/*]\s*(?:content is sanitized|safe html|already sanitized|sanitized|safe to use|xss safe)/i.test(surroundingLines)) return false;
       return true;
     },
     astCheck: (_line, _context, ast) => {
@@ -8721,12 +8751,21 @@ const RULES: PatternRule[] = [
       if (/\b(?:DOMPurify|sanitize|purify|dompurify|xss)\b/i.test(line)) return false;
       // JSON.stringify() output is always safe — JSON cannot contain executable HTML
       if (/JSON\s*\.\s*stringify\s*\(/.test(line)) return false;
+      // Variable name or value contains safety-indicating words
+      if (/\b(?:safe|sanitized|cleaned|purified|escaped)\w*\b/i.test(line)) return false;
       // Check the value between __html: and }} for sanitization wrappers
       const htmlValueMatch = line.match(/__html\s*:\s*(.+?)(?:\}\}|$)/);
       if (htmlValueMatch) {
         const htmlValue = htmlValueMatch[1];
-        if (/\b(?:sanitize|DOMPurify\.sanitize|markdownToSafeHTML|purify|xss|sanitizeHtml|escapeHtml|JSON\.stringify)\s*\(/.test(htmlValue)) return false;
+        if (/\b(?:sanitize|DOMPurify\.sanitize|markdownToSafeHTML|purify|xss|sanitizeHtml|escapeHtml|JSON\.stringify|safe\w*|clean\w*|escape\w*|encode\w*)\s*\(/i.test(htmlValue)) return false;
       }
+      // Check surrounding lines for safety comments or lint-disable directives
+      const lineIdx = ctx.lineNumber - 1;
+      const surroundingStart = Math.max(0, lineIdx - 3);
+      const surroundingEnd = Math.min(ctx.allLines.length, lineIdx + 4);
+      const surroundingLines = ctx.allLines.slice(surroundingStart, surroundingEnd).join('\n');
+      if (/(?:biome-ignore|eslint-disable)/.test(surroundingLines)) return false;
+      if (/\/[/*]\s*(?:content is sanitized|safe html|already sanitized|sanitized|safe to use|xss safe)/i.test(surroundingLines)) return false;
       return true;
     },
     astCheck: (_line, _context, ast) => {
@@ -20373,6 +20412,18 @@ async function scanFileContent(filePath: string, content: string): Promise<Findi
       // If tree-sitter initialization fails entirely, keep all pending findings
       for (const { finding } of pendingAstChecks) {
         findings.push(finding);
+      }
+    }
+  }
+
+  // ── Post-scan: auto-demote test/fixture/e2e file findings to info ──
+  // Regardless of per-rule skipTestFiles settings, ALL findings in test/fixture/
+  // playwright/cypress/e2e/storybook files are informational — they should not
+  // block commits but remain visible for awareness.
+  if (fileIsTest) {
+    for (const finding of findings) {
+      if (finding.severity !== 'info') {
+        finding.severity = 'info';
       }
     }
   }

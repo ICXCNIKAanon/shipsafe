@@ -282,6 +282,16 @@ function isTestOrDocsFile(filePath: string): boolean {
     lower.endsWith('.test.js') ||
     lower.endsWith('.spec.ts') ||
     lower.endsWith('.spec.js') ||
+    // Playwright / Cypress / E2E test directories
+    lower.includes('/playwright/') ||
+    lower.includes('/cypress/') ||
+    lower.includes('/e2e/') ||
+    lower.includes('/__e2e__/') ||
+    // Storybook stories
+    lower.endsWith('.stories.ts') ||
+    lower.endsWith('.stories.tsx') ||
+    lower.endsWith('.stories.js') ||
+    lower.endsWith('.stories.jsx') ||
     // Documentation directories and files
     lower.includes('/docs/') ||
     lower.includes('/docs_src/') ||
@@ -2464,6 +2474,27 @@ async function scanFile(
         continue;
       }
 
+      // Skip JSON.parse(process.env...) destructuring patterns — reading from env, not hardcoding
+      if (/JSON\.parse\s*\(\s*process\.env\b/.test(line)) {
+        continue;
+      }
+
+      // Skip sentinel/placeholder values (NOOP, UNUSED, PLACEHOLDER, etc.)
+      const upperSecret = secretValue.toUpperCase();
+      if (/\b(?:NOOP|UNUSED|PLACEHOLDER|EXAMPLE|DUMMY|TODO|FIXME)\b/.test(upperSecret)) {
+        continue;
+      }
+
+      // Skip ALL_CAPS_WITH_UNDERSCORES constants/enum values (e.g., DELEGATION_TOKEN_DB)
+      // These are constant names, not secret values. Must contain at least one underscore
+      // to distinguish from real tokens like AKIA... or hex strings.
+      {
+        const trimmedSecret = secretValue.trim().replace(/['"` ]/g, '');
+        if (/^[A-Z][A-Z0-9_]{3,}$/.test(trimmedSecret) && trimmedSecret.includes('_')) {
+          continue;
+        }
+      }
+
       // Entropy check
       if (pattern.entropyCheck) {
         const threshold = pattern.entropyThreshold ?? 3.5;
@@ -2481,6 +2512,33 @@ async function scanFile(
           contextWindow.toLowerCase().includes(kw.toLowerCase()),
         );
         if (!hasContext) continue;
+      }
+
+      // ── Fix 5: Distinguish variable NAME from VALUE for generic assignment patterns ──
+      // For patterns that match on variable names (password=, secret=, token=, etc.),
+      // check what's on the RIGHT side of the assignment. Only flag actual hardcoded string literals.
+      const isGenericAssignment = /^(?:password|secret|access.?token|secret.?key|auth.?token|api.?key|private.?key)-assignment/.test(pattern.id) ||
+        pattern.id === 'high-entropy-base64-with-key-context';
+      if (isGenericAssignment) {
+        // Extract the right-hand side of the assignment
+        const assignMatch = line.match(/[=:]\s*(.+)$/);
+        if (assignMatch) {
+          const rhs = assignMatch[1].trim();
+          // Skip function calls on the RHS: JSON.parse(...), decrypt(...), getSecret(...), etc.
+          if (/^\w[\w.]*\s*\(/.test(rhs) || /^await\s+\w/.test(rhs)) continue;
+          // Skip property access: config.secret, env.TOKEN, etc.
+          if (/^\w+\.\w+/.test(rhs) && !/^['"`]/.test(rhs)) continue;
+          // Skip variable references (not string literals)
+          if (/^\w+[\s;,)]*$/.test(rhs) && !/^['"`]/.test(rhs)) continue;
+          // Skip destructuring: const { client_secret } = ...
+          if (/\{\s*[\w,\s]+\}\s*=/.test(line)) continue;
+          // Skip URL paths: starts with "/" or "http"
+          const strMatch = rhs.match(/^['"`]([^'"`]+)['"`]/);
+          if (strMatch) {
+            const strValue = strMatch[1];
+            if (/^(?:\/|https?:\/\/)/.test(strValue)) continue;
+          }
+        }
       }
 
       // Downgrade severity for .env.example / .env.sample files and test/docs files

@@ -159,6 +159,13 @@ const SEVERITY_ORDER: Record<Severity, number> = {
   info: 4,
 };
 
+// ── Helper: Check if a file is a React component file (.tsx/.jsx) ──
+// Rules that only apply to backend/server code should use this to skip UI files.
+
+function isReactComponentFile(filePath: string): boolean {
+  return filePath.endsWith('.tsx') || filePath.endsWith('.jsx');
+}
+
 // ── Helper: Check if a line is inside a comment ──
 
 function isCommentLine(line: string, fileType: FileType): boolean {
@@ -1750,6 +1757,32 @@ const RULES: PatternRule[] = [
       const hasSecurityTerm = securityTerms.some(term => lower.includes(term));
       if (!hasSecurityTerm) return false;
       if (/timingSafeEqual/.test(line)) return false;
+
+      // ── FP reduction: skip non-security "token" usages ──
+      // Skip variables named like pagination/URL tokens (not auth secrets)
+      if (/\b(?:pageToken|nextPageToken|cursorToken|routeToken|urlToken|syncToken|deviceToken|pushToken|registrationToken|csrfToken|displayToken)\b/.test(line)) return false;
+      // Skip lines inside JSX markup (between < > or with JSX attributes)
+      if (/\b(?:className|onClick|onChange|onSubmit|href|aria-|data-|style)\b/.test(line)) return false;
+      if (/^\s*</.test(line.trim()) && />/.test(line)) return false;
+      // Skip .tsx files where comparison is in a component render context (not utility functions)
+      if (isReactComponentFile(ctx.filePath)) {
+        // Only flag in .tsx if the line looks like it's in actual auth/crypto logic
+        if (!/\b(?:verify|authenticate|validate|compare|check|crypto|bcrypt|scrypt)\b/i.test(line)) return false;
+      }
+      // Require BOTH sides of the comparison to involve security-sensitive terms,
+      // or one side to be a clearly user-provided value (req., headers, params)
+      const comparisonParts = line.split('===');
+      if (comparisonParts.length === 2) {
+        const left = comparisonParts[0].toLowerCase();
+        const right = comparisonParts[1].toLowerCase();
+        const leftHasSecurity = securityTerms.some(t => left.includes(t));
+        const rightHasSecurity = securityTerms.some(t => right.includes(t));
+        const leftHasUserInput = /\b(?:req\.|headers|params|query|body|input)\b/.test(left);
+        const rightHasUserInput = /\b(?:req\.|headers|params|query|body|input)\b/.test(right);
+        // Flag only if both sides are security-related, or one side is from user input
+        if (!((leftHasSecurity && rightHasSecurity) || leftHasUserInput || rightHasUserInput)) return false;
+      }
+
       // Skip comparisons against numeric literals or single characters (binary parsers)
       if (/===\s*(?:0x[0-9a-fA-F]+|\d+|'.'|".")/.test(line) || /(?:0x[0-9a-fA-F]+|\d+|'.'|".")\s*===/.test(line)) return false;
       // Check a wider window (10 lines before and after) for timingSafeEqual usage
@@ -2918,6 +2951,25 @@ const RULES: PatternRule[] = [
       // Publishable/public keys are intentionally client-side
       if (/\bNEXT_PUBLIC_\w*PUBLISHABLE\w*\b/.test(line)) return false;
       if (/\bNEXT_PUBLIC_\w*PUBLIC_KEY\b/.test(line)) return false;
+      // ── Additional FP exclusions for common non-secret patterns ──
+      // URL variables that happen to contain AUTH/TOKEN/KEY in the name
+      if (/\bNEXT_PUBLIC_\w*(?:_URL|_DOMAIN|_ENDPOINT|_HOST|_BASE_PATH|_WEBAPP)\w*\b/.test(line)) return false;
+      // Common app config vars that are not secrets
+      if (/\bNEXT_PUBLIC_WEBAPP_URL\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_AUTH_URL\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_API_AUTH_URL\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_WEBSITE_AUTH_URL\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_CALCOM_TOKEN\b/.test(line)) return false;
+      // Intercom, analytics, and other client-safe service keys
+      if (/\bNEXT_PUBLIC_INTERCOM_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_TURNSTILE_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_TURNSTILE_SITE_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_HCAPTCHA_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_HCAPTCHA_SITE_KEY\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_PLAUSIBLE_TOKEN\b/.test(line)) return false;
+      if (/\bNEXT_PUBLIC_VERCEL_TOKEN\b/.test(line)) return false;
+      // Generic: any NEXT_PUBLIC_ var ending in _URL, _DOMAIN, _ENDPOINT is a URL, not a secret
+      if (/\bNEXT_PUBLIC_[A-Z_]*(?:_URL|_DOMAIN|_ENDPOINT|_HOST)\b/.test(line)) return false;
       return true;
     },
   },
@@ -4981,11 +5033,19 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
       // Detect href or src assignment with variable that could be javascript:
       if (!/\b(?:href|src|action|formAction)\s*=\s*\{?\s*(?:url|link|href|redirect|target|userUrl)\b/.test(line)) return false;
       // Check that there's no protocol validation nearby
-      return !/\b(?:protocol|startsWith\s*\(\s*['"]https?:?['"]|isValidUrl|validateUrl)\b/.test(line);
+      if (/\b(?:protocol|startsWith\s*\(\s*['"]https?:?['"]|isValidUrl|validateUrl)\b/.test(line)) return false;
+      // ── FP reduction: skip static JSX attributes ──
+      // Skip JSX string literals (href="/page", href="https://...")
+      if (/\b(?:href|src|action|formAction)\s*=\s*["']/.test(line)) return false;
+      // Only flag when the URL value comes from user input or untrusted sources
+      const hasUserInput = /\b(?:req\.|searchParams|params\[|query\[|useSearchParams|router\.query|window\.location|document\.location|location\.search)\b/.test(line);
+      // In .tsx/.jsx files, skip unless the URL is explicitly from user input
+      if (isReactComponentFile(ctx.filePath) && !hasUserInput) return false;
+      return true;
     },
   },
   {
@@ -5352,16 +5412,21 @@ const RULES: PatternRule[] = [
     category: 'Authentication',
     description:
       'Promise.all used for auth checks without error boundaries — one failure rejects all, potentially bypassing remaining checks.',
-    severity: 'medium',
+    severity: 'info',
     fix_suggestion:
       'Use Promise.allSettled() for multiple auth checks, or wrap each in try/catch. Promise.all fails fast — one rejection skips remaining checks.',
     auto_fixable: false,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
       if (!/\bPromise\.all\s*\(/.test(line)) return false;
-      return /(?:auth|permission|access|role|token|verify|validate)/i.test(line);
+      // Must contain auth-specific terms — not just generic "token" or "validate"
+      // Require at least one clearly auth-related term in the Promise.all arguments
+      if (!/\b(?:auth|permission|checkAuth|isAuthorized|verifyAuth|requireAuth|checkPermission|checkAccess)\b/i.test(line)) return false;
+      // Skip React component files — parallel data fetching in components is normal
+      if (isReactComponentFile(ctx.filePath)) return false;
+      return true;
     },
   },
 
@@ -9263,12 +9328,23 @@ const RULES: PatternRule[] = [
     severity: 'low',
     fix_suggestion: 'Use a distributed lock (Redis SETNX, database advisory lock) for cron jobs.',
     auto_fixable: false,
-    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    fileTypes: ['.ts', '.js'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip React component files — setInterval in UI is not a cron job
+      if (isReactComponentFile(ctx.filePath)) return false;
       if (!/\b(?:cron|schedule|setInterval)\b/i.test(line)) return false;
       if (!/\b(?:cron\.schedule|schedule\.scheduleJob|setInterval)\s*\(/.test(line)) return false;
+      // For setInterval specifically, only flag in server-side contexts:
+      // file path must contain cron/schedule/job/worker keywords, OR the function must be named with them
+      if (/\bsetInterval\s*\(/.test(line)) {
+        const pathLower = ctx.filePath.toLowerCase();
+        const hasServerContext = /(?:cron|schedule|job|worker|task|queue|daemon|service)/.test(pathLower);
+        const lineContext = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber).join('\n').toLowerCase();
+        const hasServerFunctionName = /\b(?:cron|schedule|job|worker|poll|heartbeat|sync)\b/.test(lineContext);
+        if (!hasServerContext && !hasServerFunctionName) return false;
+      }
       return !/\b(?:lock|mutex|semaphore|setnx|advisory)\b/i.test(ctx.fileContent);
     },
   },
@@ -14284,10 +14360,12 @@ const RULES: PatternRule[] = [
     severity: 'medium',
     fix_suggestion: 'Implement API key rotation with expiry dates and a key management lifecycle.',
     auto_fixable: false,
-    fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
+    fileTypes: ['.ts', '.js'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip React component files — they display keys, they don't manage rotation
+      if (isReactComponentFile(ctx.filePath)) return false;
       if (!/\b(?:generateApiKey|generate_api_key|createApiKey|create_api_key)\b/.test(line)) return false;
       const nearby = ctx.allLines.slice(ctx.lineNumber - 1, Math.min(ctx.allLines.length, ctx.lineNumber + 10)).join('\n');
       return !/\b(?:expir|rotation|rotateAt|rotate_at|validUntil)\b/i.test(nearby);

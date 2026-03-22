@@ -2489,16 +2489,12 @@ async function scanFile(
         ? `${pattern.description} (in example file — likely placeholder)`
         : pattern.description;
 
-      // Demo/default password severity downgrade
+      // Demo/default password — keep severity, improve message
       if (
         (pattern.type === 'hardcoded_password' || pattern.type === 'database_password' || pattern.type === 'pkcs12_password') &&
-        isDemoPassword(secretValue) &&
-        effectiveSeverity !== 'info' // don't downgrade below info
+        isDemoPassword(secretValue)
       ) {
-        if (effectiveSeverity === 'critical' || effectiveSeverity === 'high') {
-          effectiveSeverity = 'medium';
-        }
-        effectiveDescription += ' \u2014 appears to be a demo/default password. Ensure this is not used in production.';
+        effectiveDescription += ' \u2014 demo/default password detected. These get forked and deployed to production. Use environment variables instead.';
       }
 
       findings.push({

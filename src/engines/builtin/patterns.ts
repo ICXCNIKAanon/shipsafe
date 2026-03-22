@@ -2391,10 +2391,15 @@ const RULES: PatternRule[] = [
     skipTestFiles: true,
     detect: (line) => {
       const lower = line.toLowerCase();
+      // Must be generating a token/secret, not checking expiry or timestamps
       const isSecurityContext = lower.includes('token') || lower.includes('session') ||
         lower.includes('nonce') || lower.includes('csrf') || lower.includes('secret') ||
         lower.includes('apikey') || lower.includes('api_key');
       if (!isSecurityContext) return false;
+      // Skip expiry/timestamp contexts — Date.now() used for calculating when something expires is fine
+      if (/expires|expir|ttl|timeout|timestamp|createdAt|updatedAt|validUntil|expiration/i.test(line)) return false;
+      // Skip comparisons — Date.now() used to CHECK if something expired is fine
+      if (/[<>]=?\s*(?:Date\.now|new Date)/.test(line) || /(?:Date\.now|new Date)\s*[<>]=?/.test(line)) return false;
       return /\bDate\s*\.\s*now\s*\(\s*\)/.test(line) ||
         /\buuid\s*\.\s*v1\s*\(\s*\)/.test(line) ||
         /\buuidv1\s*\(\s*\)/.test(line);
@@ -10661,10 +10666,17 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
       if (!/\b(?:fetch|axios|got|request|http\.get)\s*\(/.test(line)) return false;
-      return /\b(?:fetch|axios|got|request)\s*\(\s*(?:req\s*\.\s*(?:body|query)|userUrl|url|targetUrl)\b/.test(line) &&
-        !/\b(?:ssrf|validate|allowlist|whitelist|resolve)\b/i.test(line);
+      // Only flag when URL clearly comes from user input, not a constructed API URL
+      const hasUserInput = /\b(?:fetch|axios|got|request)\s*\(\s*(?:req\s*\.\s*(?:body|query|params)|userUrl|targetUrl|redirectUrl|callbackUrl)\b/.test(line);
+      if (!hasUserInput) return false;
+      if (/\b(?:ssrf|validate|allowlist|whitelist|resolve)\b/i.test(line)) return false;
+      // Skip when the URL is constructed from a known API base (hardcoded domain)
+      const lineIdx = ctx.lineNumber - 1;
+      const window = ctx.allLines.slice(Math.max(0, lineIdx - 5), lineIdx + 1).join('\n');
+      if (/(?:API_BASE|API_URL|BASE_URL|ENDPOINT|graph\.facebook|googleapis|api\.stripe|api\.twilio)\b/i.test(window)) return false;
+      return true;
     },
   },
   {
@@ -14648,8 +14660,9 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
-      if (!/\bfetch\s*\(\s*(?:req\.|params\.|query\.|url|userUrl|targetUrl)/.test(line)) return false;
+      if (!/\bfetch\s*\(\s*(?:req\.|params\.|query\.|userUrl|targetUrl|redirectUrl|callbackUrl)/.test(line)) return false;
       const nearby = ctx.allLines.slice(Math.max(0, ctx.lineNumber - 5), ctx.lineNumber).join('\n');
+      if (/(?:API_BASE|API_URL|BASE_URL|ENDPOINT)\b/i.test(nearby)) return false;
       return /\b(?:isAllowed|isValid|validateUrl|checkUrl)\b/.test(nearby) &&
         !/\b(?:dns\.resolve|dns\.lookup|net\.isIP)\b/.test(nearby);
     },

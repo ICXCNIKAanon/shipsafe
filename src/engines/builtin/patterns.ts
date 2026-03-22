@@ -10765,7 +10765,7 @@ const RULES: PatternRule[] = [
     category: 'Input Validation',
     description:
       'Fastify route handler without JSON schema validation — bypasses Fastify\'s built-in input validation.',
-    severity: 'medium',
+    severity: 'low',
     fix_suggestion:
       'Add schema property to route options: { schema: { body: { type: "object", properties: {...}, required: [...] } } }.',
     auto_fixable: false,
@@ -11622,7 +11622,7 @@ const RULES: PatternRule[] = [
     category: 'Type Safety',
     description:
       'Type assertion (as SomeType) on request body bypasses runtime validation — attacker-controlled data is treated as trusted.',
-    severity: 'high',
+    severity: 'medium',
     fix_suggestion:
       'Validate request body at runtime with Zod, Yup, or io-ts before using it as a typed object.',
     auto_fixable: false,

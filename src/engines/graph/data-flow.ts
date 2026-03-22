@@ -67,8 +67,8 @@ export function classifySink(name: string): string | null {
     return 'eval';
   }
 
-  // shell: spawn, exec (but not execute/execSync — those go to database/shell)
-  // exec is both shell and database — shell takes priority
+  // shell: spawn, exec (but not execute/execSync -- those go to database/shell)
+  // exec is both shell and database -- shell takes priority
   if (nameLower === 'exec' || nameLower === 'execsync' || nameLower === 'spawn' || nameLower === 'execfile') {
     return 'shell';
   }
@@ -110,19 +110,14 @@ function isSanitizer(name: string): boolean {
  */
 export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]> {
   // Step 1: Get all functions
-  const allFunctionsRaw = (await store.query(
-    'MATCH (fn:Function) RETURN fn.name AS name, fn.filePath AS filePath, fn.startLine AS line',
-  )) as Array<Record<string, unknown>>;
+  const allFunctions = store.getAllFunctions();
 
-  if (allFunctionsRaw.length === 0) {
+  if (allFunctions.length === 0) {
     return [];
   }
 
   // Step 2: Identify source functions
-  const sourceFunctions = allFunctionsRaw.filter((fn) => {
-    const name = fn['name'] as string;
-    return classifySource(name) !== null;
-  });
+  const sourceFunctions = allFunctions.filter((fn) => classifySource(fn.name) !== null);
 
   const results: DataFlowResult[] = [];
   // Track source+sink pairs to avoid duplicates
@@ -130,11 +125,11 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
 
   // Step 3 & 4: For each source, find callers and BFS their callees to find sinks
   for (const sourceFn of sourceFunctions) {
-    const sourceName = sourceFn['name'] as string;
+    const sourceName = sourceFn.name;
     const sourceType = classifySource(sourceName)!;
 
     // Find all functions that call this source (i.e., functions that handle tainted data)
-    const callers = (await store.getCallers(sourceName, 1)) as GraphFunction[];
+    const callers = await store.getCallers(sourceName, 1);
 
     for (const caller of callers) {
       // Pre-compute whether any function reachable from caller (within MAX_DEPTH)
@@ -142,7 +137,7 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
       //   safeHandler -> sanitizeInput (sanitizer)
       //   safeHandler -> exec (sink)
       // Even though sanitizeInput is not on the path to exec, it shows sanitization intent.
-      const allCalleesOfCaller = (await store.getCallees(caller.name, MAX_DEPTH)) as GraphFunction[];
+      const allCalleesOfCaller = await store.getCallees(caller.name, MAX_DEPTH);
       const callerHasSanitizerInScope =
         isSanitizer(caller.name) ||
         allCalleesOfCaller.some((fn) => isSanitizer(fn.name));
@@ -179,8 +174,8 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
             results.push({
               source: {
                 name: sourceName,
-                filePath: sourceFn['filePath'] as string,
-                line: sourceFn['line'] as number,
+                filePath: sourceFn.filePath,
+                line: sourceFn.startLine,
                 type: sourceType,
               },
               sink: {
@@ -200,7 +195,7 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
         if (depth >= MAX_DEPTH) continue;
 
         // Get direct callees of current function
-        const callees = (await store.getCallees(fn.name, 1)) as GraphFunction[];
+        const callees = await store.getCallees(fn.name, 1);
         for (const callee of callees) {
           if (visited.has(callee.name)) continue;
           visited.add(callee.name);
@@ -216,8 +211,8 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
               results.push({
                 source: {
                   name: sourceName,
-                  filePath: sourceFn['filePath'] as string,
-                  line: sourceFn['line'] as number,
+                  filePath: sourceFn.filePath,
+                  line: sourceFn.startLine,
                   type: sourceType,
                 },
                 sink: {

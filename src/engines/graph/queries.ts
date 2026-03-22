@@ -58,22 +58,17 @@ function isHandlerLike(name: string): boolean {
  */
 export async function findAttackPaths(store: GraphStore): Promise<AttackPath[]> {
   // Step 1: Get all functions to identify entry points
-  const allFunctions = (await store.query(
-    'MATCH (fn:Function) RETURN fn.name AS name, fn.filePath AS filePath, fn.startLine AS line, fn.isAsync AS isAsync, fn.isExported AS isExported',
-  )) as Array<Record<string, unknown>>;
+  const allFunctions = store.getAllFunctions();
 
   const entryPoints = allFunctions.filter((fn) => {
-    const name = fn['name'] as string;
-    const isExported = fn['isExported'] as boolean;
-    const isAsync = fn['isAsync'] as boolean;
-    return isExported && (isHandlerLike(name) || isAsync);
+    return fn.isExported && (isHandlerLike(fn.name) || fn.isAsync);
   });
 
   const attackPaths: AttackPath[] = [];
 
   // Step 2: For each entry point, trace call chains to find sinks
   for (const entry of entryPoints) {
-    const entryName = entry['name'] as string;
+    const entryName = entry.name;
 
     // Get all direct callees (depth 1 only to build specific paths)
     const directCallees = await store.getCallees(entryName, 1);
@@ -85,8 +80,8 @@ export async function findAttackPaths(store: GraphStore): Promise<AttackPath[]> 
         attackPaths.push({
           entryPoint: {
             name: entryName,
-            filePath: entry['filePath'] as string,
-            line: entry['line'] as number,
+            filePath: entry.filePath,
+            line: entry.startLine,
           },
           sink: {
             name: callee.name,
@@ -106,8 +101,8 @@ export async function findAttackPaths(store: GraphStore): Promise<AttackPath[]> 
             attackPaths.push({
               entryPoint: {
                 name: entryName,
-                filePath: entry['filePath'] as string,
-                line: entry['line'] as number,
+                filePath: entry.filePath,
+                line: entry.startLine,
               },
               sink: {
                 name: deepCallee.name,
@@ -163,30 +158,24 @@ export async function findBlastRadius(
 
 export async function findMissingAuth(store: GraphStore): Promise<MissingAuthResult[]> {
   // Find all exported endpoint-like functions
-  const allFunctions = (await store.query(
-    'MATCH (fn:Function) RETURN fn.name AS name, fn.filePath AS filePath, fn.startLine AS line, fn.isAsync AS isAsync, fn.isExported AS isExported',
-  )) as Array<Record<string, unknown>>;
+  const allFunctions = store.getAllFunctions();
 
   const results: MissingAuthResult[] = [];
 
   for (const fn of allFunctions) {
-    const name = fn['name'] as string;
-    const isExported = fn['isExported'] as boolean;
-    const isAsync = fn['isAsync'] as boolean;
-
     // Only check endpoint-like functions (handler/route/controller/api pattern AND async)
-    if (!isExported || !isAsync || !isHandlerLike(name)) continue;
+    if (!fn.isExported || !fn.isAsync || !isHandlerLike(fn.name)) continue;
 
     // Check if any function in the call chain (callees) has 'auth' in the name
-    const callees = await store.getCallees(name, 10);
+    const callees = await store.getCallees(fn.name, 10);
     const hasAuth = callees.some((callee) => callee.name.toLowerCase().includes('auth'));
 
     if (!hasAuth) {
       results.push({
         endpoint: {
-          name,
-          filePath: fn['filePath'] as string,
-          line: fn['line'] as number,
+          name: fn.name,
+          filePath: fn.filePath,
+          line: fn.startLine,
         },
         reason: 'No auth middleware in call chain',
       });

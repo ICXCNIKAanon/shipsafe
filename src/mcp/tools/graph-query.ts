@@ -1,7 +1,3 @@
-import os from 'node:os';
-import path from 'node:path';
-import { rm, mkdir } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
 import { initParser, parseProject } from '../../engines/graph/parser.js';
 import { createGraphStore } from '../../engines/graph/store.js';
 import {
@@ -30,10 +26,8 @@ export async function handleGraphQuery(params: GraphQueryParams): Promise<object
   // Parse the project
   const parsedFiles = await parseProject(projectDir);
 
-  // Create a temporary graph store
-  const tmpDir = path.join(os.tmpdir(), `shipsafe-graph-query-${randomUUID()}`);
-  await mkdir(tmpDir, { recursive: true });
-  const store = await createGraphStore(tmpDir);
+  // Create an in-memory graph store
+  const store = await createGraphStore();
 
   try {
     // Build the graph
@@ -150,12 +144,7 @@ export async function handleGraphQuery(params: GraphQueryParams): Promise<object
         return { error: `Unknown query_type: ${query_type}` };
     }
   } finally {
-    // Clean up
+    // Clean up (no-op for in-memory store)
     await store.close();
-    try {
-      await rm(tmpDir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup
-    }
   }
 }

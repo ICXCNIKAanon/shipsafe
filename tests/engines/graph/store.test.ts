@@ -258,15 +258,12 @@ const mockDuplicateNames: ParsedFile[] = [
 ];
 
 // ── Tests ──
-// Each describe block uses a single shared store to minimise KuzuDB
-// native-module churn (creating/destroying many Database objects can
-// trigger SIGSEGV during garbage collection in some environments).
 
 describe('GraphStore — basic functions', () => {
   let store: GraphStore;
 
   beforeAll(async () => {
-    store = await createGraphStore(':memory:');
+    store = await createGraphStore();
     await store.buildGraph(mockParsedFiles);
   });
 
@@ -274,17 +271,14 @@ describe('GraphStore — basic functions', () => {
     await store.close();
   });
 
-  it('createGraphStore returns a store that can query the graph', async () => {
-    // Verify the store is functional by executing an actual query
-    const rows = await store.query('MATCH (n) RETURN count(n) AS total');
-    const total = (rows as Array<Record<string, unknown>>)[0]['total'];
-    expect(typeof total).toBe('number');
-    expect(total as number).toBeGreaterThan(0);
+  it('createGraphStore returns a store with function nodes', async () => {
+    const allFns = store.getAllFunctions();
+    expect(allFns.length).toBeGreaterThan(0);
   });
 
-  it('inserts function nodes from parsed files', async () => {
-    const rows = await store.query('MATCH (f:Function) RETURN f.name ORDER BY f.name');
-    const names = (rows as Array<Record<string, unknown>>).map((r) => r['f.name']);
+  it('inserts function nodes from parsed files', () => {
+    const allFns = store.getAllFunctions();
+    const names = allFns.map((f) => f.name);
     expect(names).toContain('handleRequest');
     expect(names).toContain('validateInput');
     expect(names).toContain('runQuery');
@@ -317,35 +311,9 @@ describe('GraphStore — basic functions', () => {
   });
 
   it('creates CALLS edges for call sites', async () => {
-    const rows = await store.query(
-      'MATCH (a:Function)-[:CALLS]->(b:Function) RETURN a.name, b.name',
-    );
-    expect(rows).toHaveLength(1);
-    const row = rows[0] as Record<string, unknown>;
-    expect(row['a.name']).toBe('handleRequest');
-    expect(row['b.name']).toBe('validateInput');
-  });
-
-  it('creates CONTAINS edges (file -> function)', async () => {
-    const rows = await store.query(
-      "MATCH (f:File)-[:CONTAINS]->(fn:Function) WHERE f.path = 'src/routes/api.ts' RETURN fn.name ORDER BY fn.name",
-    );
-    const names = (rows as Array<Record<string, unknown>>).map((r) => r['fn.name']);
-    expect(names).toContain('handleRequest');
-    expect(names).toContain('validateInput');
-  });
-
-  it('creates IMPORTS edges (file -> module)', async () => {
-    const rows = await store.query(
-      'MATCH (f:File)-[r:IMPORTS]->(m:Module) RETURN f.path, m.name, r.specifiers ORDER BY m.name',
-    );
-    expect(rows.length).toBeGreaterThanOrEqual(2);
-
-    const expressImport = (rows as Array<Record<string, unknown>>).find(
-      (r) => r['m.name'] === 'express',
-    );
-    expect(expressImport).toBeDefined();
-    expect(expressImport!['f.path']).toBe('src/routes/api.ts');
+    const callees = await store.getCallees('handleRequest');
+    expect(callees).toHaveLength(1);
+    expect(callees[0].name).toBe('validateInput');
   });
 
   it('getCallers returns functions that call the target', async () => {
@@ -384,20 +352,9 @@ describe('GraphStore — basic functions', () => {
     expect(imports).toHaveLength(0);
   });
 
-  it('query executes raw Cypher queries', async () => {
-    const rows = await store.query('MATCH (f:File) RETURN f.path ORDER BY f.path');
-    const paths = (rows as Array<Record<string, unknown>>).map((r) => r['f.path']);
-    expect(paths).toContain('src/routes/api.ts');
-    expect(paths).toContain('src/db/queries.ts');
-  });
-
-  it('query supports parameterized queries', async () => {
-    const rows = await store.query(
-      'MATCH (f:Function) WHERE f.name = $name RETURN f.filePath',
-      { name: 'handleRequest' },
-    );
-    expect(rows).toHaveLength(1);
-    expect((rows[0] as Record<string, unknown>)['f.filePath']).toBe('src/routes/api.ts');
+  it('getAllFunctions returns all function nodes', () => {
+    const allFns = store.getAllFunctions();
+    expect(allFns.length).toBe(3); // handleRequest, validateInput, runQuery
   });
 });
 
@@ -405,50 +362,12 @@ describe('GraphStore — classes and methods', () => {
   let store: GraphStore;
 
   beforeAll(async () => {
-    store = await createGraphStore(':memory:');
+    store = await createGraphStore();
     await store.buildGraph(mockWithClasses);
   });
 
   afterAll(async () => {
     await store.close();
-  });
-
-  it('inserts class nodes', async () => {
-    const rows = await store.query('MATCH (c:Class) RETURN c.name');
-    expect(rows).toHaveLength(1);
-    expect((rows[0] as Record<string, unknown>)['c.name']).toBe('UserController');
-  });
-
-  it('stores class properties correctly', async () => {
-    const rows = await store.query(
-      "MATCH (c:Class) WHERE c.name = 'UserController' RETURN c.name, c.filePath, c.startLine, c.endLine, c.isExported",
-    );
-    expect(rows).toHaveLength(1);
-    const row = rows[0] as Record<string, unknown>;
-    expect(row['c.filePath']).toBe('src/controllers/user.ts');
-    expect(row['c.startLine']).toBe(3);
-    expect(row['c.endLine']).toBe(32);
-    expect(row['c.isExported']).toBe(true);
-  });
-
-  it('creates CONTAINS_CLASS edges (file -> class)', async () => {
-    const rows = await store.query(
-      'MATCH (f:File)-[:CONTAINS_CLASS]->(c:Class) RETURN f.path, c.name',
-    );
-    expect(rows).toHaveLength(1);
-    const row = rows[0] as Record<string, unknown>;
-    expect(row['f.path']).toBe('src/controllers/user.ts');
-    expect(row['c.name']).toBe('UserController');
-  });
-
-  it('creates HAS_METHOD edges (class -> function)', async () => {
-    const rows = await store.query(
-      "MATCH (c:Class)-[:HAS_METHOD]->(fn:Function) WHERE c.name = 'UserController' RETURN fn.name ORDER BY fn.name",
-    );
-    const names = (rows as Array<Record<string, unknown>>).map((r) => r['fn.name']);
-    expect(names).toContain('getUser');
-    expect(names).toContain('deleteUser');
-    expect(names).not.toContain('helperFn');
   });
 
   it('getFunction retrieves a class method by name', async () => {
@@ -459,13 +378,27 @@ describe('GraphStore — classes and methods', () => {
   });
 
   it('creates CALLS edges for calls from class methods', async () => {
+    const callees = await store.getCallees('getUser');
+    expect(callees).toHaveLength(1);
+    expect(callees[0].name).toBe('helperFn');
+  });
+
+  it('query returns class nodes', async () => {
+    const rows = await store.query('MATCH (c:Class) RETURN c.name');
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as Record<string, unknown>)['c.name']).toBe('UserController');
+  });
+
+  it('query returns class properties', async () => {
     const rows = await store.query(
-      'MATCH (a:Function)-[:CALLS]->(b:Function) RETURN a.name, b.name',
+      "MATCH (c:Class) WHERE c.name = 'UserController' RETURN c.name, c.filePath, c.startLine, c.endLine, c.isExported",
     );
     expect(rows).toHaveLength(1);
     const row = rows[0] as Record<string, unknown>;
-    expect(row['a.name']).toBe('getUser');
-    expect(row['b.name']).toBe('helperFn');
+    expect(row['c.filePath']).toBe('src/controllers/user.ts');
+    expect(row['c.startLine']).toBe(3);
+    expect(row['c.endLine']).toBe(32);
+    expect(row['c.isExported']).toBe(true);
   });
 });
 
@@ -473,7 +406,7 @@ describe('GraphStore — transitive call chains', () => {
   let store: GraphStore;
 
   beforeAll(async () => {
-    store = await createGraphStore(':memory:');
+    store = await createGraphStore();
     await store.buildGraph(mockCallChain);
   });
 
@@ -514,7 +447,7 @@ describe('GraphStore — duplicate function names', () => {
   let store: GraphStore;
 
   beforeAll(async () => {
-    store = await createGraphStore(':memory:');
+    store = await createGraphStore();
     await store.buildGraph(mockDuplicateNames);
   });
 
@@ -522,32 +455,26 @@ describe('GraphStore — duplicate function names', () => {
     await store.close();
   });
 
-  it('handles multiple files with same-named functions via unique IDs', async () => {
-    const rows = await store.query(
-      "MATCH (f:Function) WHERE f.name = 'init' RETURN f.id, f.filePath ORDER BY f.filePath",
-    );
-    expect(rows).toHaveLength(2);
-
-    const row0 = rows[0] as Record<string, unknown>;
-    const row1 = rows[1] as Record<string, unknown>;
-    expect(row0['f.id']).toBe('src/a.ts::init');
-    expect(row1['f.id']).toBe('src/b.ts::init');
-    expect(row0['f.filePath']).toBe('src/a.ts');
-    expect(row1['f.filePath']).toBe('src/b.ts');
+  it('handles multiple files with same-named functions', () => {
+    const allFns = store.getAllFunctions();
+    const initFns = allFns.filter((f) => f.name === 'init');
+    expect(initFns).toHaveLength(2);
+    const paths = initFns.map((f) => f.filePath).sort();
+    expect(paths).toEqual(['src/a.ts', 'src/b.ts']);
   });
 });
 
 describe('GraphStore — close', () => {
   it('cleans up resources without error', async () => {
-    const store = await createGraphStore(':memory:');
+    const store = await createGraphStore();
     await store.buildGraph(mockParsedFiles);
     await expect(store.close()).resolves.toBeUndefined();
   });
 });
 
-describe('GraphStore — Cypher escaping via imports', () => {
+describe('GraphStore — module imports', () => {
   it('handles module names with single quotes', async () => {
-    const store = await createGraphStore(':memory:');
+    const store = await createGraphStore();
     const files: ParsedFile[] = [
       {
         filePath: 'src/app.ts',
@@ -563,13 +490,14 @@ describe('GraphStore — Cypher escaping via imports', () => {
     ];
     await store.buildGraph(files);
 
-    const rows = await store.query("MATCH (m:Module) WHERE m.name = 'o\\'reilly-sdk' RETURN m.name");
-    expect((rows as Array<Record<string, unknown>>)).toHaveLength(1);
+    const imports = await store.getImportsOf("o'reilly-sdk");
+    expect(imports).toHaveLength(1);
+    expect(imports[0].source).toBe("o'reilly-sdk");
     await store.close();
   });
 
   it('handles module names with backslashes', async () => {
-    const store = await createGraphStore(':memory:');
+    const store = await createGraphStore();
     const files: ParsedFile[] = [
       {
         filePath: 'src/app.ts',
@@ -585,9 +513,9 @@ describe('GraphStore — Cypher escaping via imports', () => {
     ];
     await store.buildGraph(files);
 
-    const rows = await store.query("MATCH (m:Module) RETURN m.name");
-    const names = (rows as Array<Record<string, unknown>>).map((r) => r['m.name']);
-    expect(names).toContain('path\\to\\module');
+    const imports = await store.getImportsOf('path\\to\\module');
+    expect(imports).toHaveLength(1);
+    expect(imports[0].source).toBe('path\\to\\module');
     await store.close();
   });
 });

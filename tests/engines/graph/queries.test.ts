@@ -238,7 +238,7 @@ describe('Graph query layer', () => {
   let store: GraphStore;
 
   beforeAll(async () => {
-    store = await createGraphStore(':memory:');
+    store = await createGraphStore();
     await store.buildGraph(mockParsedFiles);
   });
 

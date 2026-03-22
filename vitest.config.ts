@@ -5,7 +5,6 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
-    // Use forks pool to avoid SIGSEGV from KuzuDB native module cleanup
     pool: 'forks',
     poolOptions: {
       forks: {

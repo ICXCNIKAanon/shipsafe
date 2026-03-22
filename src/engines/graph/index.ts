@@ -1,7 +1,3 @@
-import os from 'node:os';
-import path from 'node:path';
-import { rm, mkdir } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
 import type { Finding, ScanScope } from '../../types.js';
 import { initParser, parseProject } from './parser.js';
 import { createGraphStore } from './store.js';
@@ -53,10 +49,8 @@ export async function runGraphEngine(options: {
   // 2. Parse project files
   const parsedFiles = await parseProject(targetPath);
 
-  // 3. Create a temporary graph store
-  const tmpDir = path.join(os.tmpdir(), `shipsafe-graph-${randomUUID()}`);
-  await mkdir(tmpDir, { recursive: true });
-  const store = await createGraphStore(tmpDir);
+  // 3. Create an in-memory graph store (no temp directories needed)
+  const store = await createGraphStore();
 
   try {
     // 4. Build the graph from parsed files
@@ -124,12 +118,7 @@ export async function runGraphEngine(options: {
       duration_ms: Date.now() - startTime,
     };
   } finally {
-    // 10. Clean up (close graph store and remove temp directory)
+    // 10. Close the store (no-op for in-memory, but maintains interface contract)
     await store.close();
-    try {
-      await rm(tmpDir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup
-    }
   }
 }

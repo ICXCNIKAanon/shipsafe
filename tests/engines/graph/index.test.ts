@@ -19,11 +19,6 @@ vi.mock('../../../src/engines/graph/queries.js', () => ({
   queryResultsToFindings: vi.fn(),
 }));
 
-vi.mock('node:fs/promises', () => ({
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  rm: vi.fn().mockResolvedValue(undefined),
-}));
-
 import {
   runGraphEngine,
   isGraphEngineAvailable,
@@ -145,6 +140,7 @@ function makeMockStore() {
     getCallees: vi.fn().mockResolvedValue([]),
     getImportsOf: vi.fn().mockResolvedValue([]),
     query: vi.fn().mockResolvedValue([]),
+    getAllFunctions: vi.fn().mockReturnValue([]),
     close: vi.fn().mockResolvedValue(undefined),
   };
 }

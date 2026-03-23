@@ -12,6 +12,9 @@ import { registerInitCommand } from '../src/cli/init.js';
 import { registerBaselineCommand } from '../src/cli/baseline.js';
 import { registerScanEnvironmentCommand } from '../src/cli/scan-environment.js';
 import { registerAuditCommand } from '../src/cli/audit.js';
+import { checkForUpdate } from '../src/cli/update-check.js';
+
+checkForUpdate();
 
 const program = new Command();
 program

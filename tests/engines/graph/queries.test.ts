@@ -11,9 +11,9 @@ import type { ParsedFile, AttackPath, BlastRadiusResult, MissingAuthResult } fro
 // ── Test graph fixture ──
 //
 // File: src/routes/users.ts
-//   - handleGetUser(req, res) [exported, async]  -> calls validateInput AND query
-//   - handleDeleteUser(req, res) [exported, async] -> calls execute (NO validation!)
-//   - handleUnsafeQuery(req, res) [exported, async] -> calls raw (NO validation!)
+//   - handleGetUser(req, res) [exported, async]  -> calls validateInput AND executeQuery
+//   - handleDeleteUser(req, res) [exported, async] -> calls executeRaw (NO validation!)
+//   - handleUnsafeQuery(req, res) [exported, async] -> calls queryRaw (NO validation!)
 //
 // File: src/middleware/auth.ts
 //   - checkAuth(req, res, next) [exported]
@@ -22,12 +22,12 @@ import type { ParsedFile, AttackPath, BlastRadiusResult, MissingAuthResult } fro
 //   - validateInput(data) [exported]
 //
 // File: src/db/queries.ts
-//   - query(sql, params) [method of db class]
-//   - execute(sql) [method of db class]
-//   - raw(sql) [method of db class]
+//   - executeQuery(sql, params) [method of db class]
+//   - executeRaw(sql) [method of db class]
+//   - queryRaw(sql) [method of db class]
 //
 // File: src/routes/secure.ts
-//   - handleSecureEndpoint(req, res) [exported, async] -> calls checkAuth AND query
+//   - handleSecureEndpoint(req, res) [exported, async] -> calls checkAuth AND executeQuery
 
 const mockParsedFiles: ParsedFile[] = [
   {
@@ -85,19 +85,19 @@ const mockParsedFiles: ParsedFile[] = [
       },
       {
         callerName: 'handleGetUser',
-        calleeName: 'query',
+        calleeName: 'executeQuery',
         filePath: 'src/routes/users.ts',
         line: 20,
       },
       {
         callerName: 'handleDeleteUser',
-        calleeName: 'execute',
+        calleeName: 'executeRaw',
         filePath: 'src/routes/users.ts',
         line: 35,
       },
       {
         callerName: 'handleUnsafeQuery',
-        calleeName: 'raw',
+        calleeName: 'queryRaw',
         filePath: 'src/routes/users.ts',
         line: 55,
       },
@@ -150,7 +150,7 @@ const mockParsedFiles: ParsedFile[] = [
     language: 'typescript',
     functions: [
       {
-        name: 'query',
+        name: 'executeQuery',
         filePath: 'src/db/queries.ts',
         startLine: 10,
         endLine: 20,
@@ -160,7 +160,7 @@ const mockParsedFiles: ParsedFile[] = [
         className: 'db',
       },
       {
-        name: 'execute',
+        name: 'executeRaw',
         filePath: 'src/db/queries.ts',
         startLine: 25,
         endLine: 35,
@@ -170,7 +170,7 @@ const mockParsedFiles: ParsedFile[] = [
         className: 'db',
       },
       {
-        name: 'raw',
+        name: 'queryRaw',
         filePath: 'src/db/queries.ts',
         startLine: 40,
         endLine: 50,
@@ -186,7 +186,7 @@ const mockParsedFiles: ParsedFile[] = [
         filePath: 'src/db/queries.ts',
         startLine: 5,
         endLine: 55,
-        methods: ['query', 'execute', 'raw'],
+        methods: ['executeQuery', 'executeRaw', 'queryRaw'],
         isExported: true,
       },
     ],
@@ -224,7 +224,7 @@ const mockParsedFiles: ParsedFile[] = [
       },
       {
         callerName: 'handleSecureEndpoint',
-        calleeName: 'query',
+        calleeName: 'executeQuery',
         filePath: 'src/routes/secure.ts',
         line: 15,
       },
@@ -249,22 +249,22 @@ describe('Graph query layer', () => {
   // ── findAttackPaths ──
 
   describe('findAttackPaths', () => {
-    it('finds attack path from handleDeleteUser to execute with no validation', async () => {
+    it('finds attack path from handleDeleteUser to executeRaw with no validation', async () => {
       const paths = await findAttackPaths(store);
       const deletePath = paths.find(
-        (p) => p.entryPoint.name === 'handleDeleteUser' && p.sink.name === 'execute',
+        (p) => p.entryPoint.name === 'handleDeleteUser' && p.sink.name === 'executeRaw',
       );
       expect(deletePath).toBeDefined();
       expect(deletePath!.hasValidation).toBe(false);
       expect(deletePath!.sink.type).toBe('database');
       expect(deletePath!.path).toContain('handleDeleteUser');
-      expect(deletePath!.path).toContain('execute');
+      expect(deletePath!.path).toContain('executeRaw');
     });
 
-    it('finds attack path from handleUnsafeQuery to raw with no validation', async () => {
+    it('finds attack path from handleUnsafeQuery to queryRaw with no validation', async () => {
       const paths = await findAttackPaths(store);
       const unsafePath = paths.find(
-        (p) => p.entryPoint.name === 'handleUnsafeQuery' && p.sink.name === 'raw',
+        (p) => p.entryPoint.name === 'handleUnsafeQuery' && p.sink.name === 'queryRaw',
       );
       expect(unsafePath).toBeDefined();
       expect(unsafePath!.hasValidation).toBe(false);
@@ -274,7 +274,7 @@ describe('Graph query layer', () => {
     it('marks handleGetUser path through validateInput as having validation', async () => {
       const paths = await findAttackPaths(store);
       const getPathsAll = paths.filter(
-        (p) => p.entryPoint.name === 'handleGetUser' && p.sink.name === 'query',
+        (p) => p.entryPoint.name === 'handleGetUser' && p.sink.name === 'executeQuery',
       );
 
       // The direct path (handleGetUser -> query) has no validation in it,
@@ -301,33 +301,33 @@ describe('Graph query layer', () => {
   // ── findBlastRadius ──
 
   describe('findBlastRadius', () => {
-    it('finds handleGetUser as affected when query has a vulnerability', async () => {
-      const result = await findBlastRadius(store, 'query');
+    it('finds handleGetUser as affected when executeQuery has a vulnerability', async () => {
+      const result = await findBlastRadius(store, 'executeQuery');
       const affectedNames = result.affectedFunctions.map((f) => f.name);
       expect(affectedNames).toContain('handleGetUser');
-      expect(result.targetFunction).toBe('query');
+      expect(result.targetFunction).toBe('executeQuery');
     });
 
-    it('finds handleDeleteUser as affected when execute has a vulnerability', async () => {
-      const result = await findBlastRadius(store, 'execute');
+    it('finds handleDeleteUser as affected when executeRaw has a vulnerability', async () => {
+      const result = await findBlastRadius(store, 'executeRaw');
       const affectedNames = result.affectedFunctions.map((f) => f.name);
       expect(affectedNames).toContain('handleDeleteUser');
     });
 
-    it('finds handleUnsafeQuery as affected when raw has a vulnerability', async () => {
-      const result = await findBlastRadius(store, 'raw');
+    it('finds handleUnsafeQuery as affected when queryRaw has a vulnerability', async () => {
+      const result = await findBlastRadius(store, 'queryRaw');
       const affectedNames = result.affectedFunctions.map((f) => f.name);
       expect(affectedNames).toContain('handleUnsafeQuery');
     });
 
     it('identifies affected endpoints correctly', async () => {
-      const result = await findBlastRadius(store, 'execute');
+      const result = await findBlastRadius(store, 'executeRaw');
       const endpointNames = result.affectedEndpoints.map((e) => e.name);
       expect(endpointNames).toContain('handleDeleteUser');
     });
 
     it('returns correct totalAffected count', async () => {
-      const result = await findBlastRadius(store, 'query');
+      const result = await findBlastRadius(store, 'executeQuery');
       expect(result.totalAffected).toBe(result.affectedFunctions.length);
       expect(result.totalAffected).toBeGreaterThanOrEqual(1);
     });
@@ -382,8 +382,8 @@ describe('queryResultsToFindings', () => {
     const attackPaths: AttackPath[] = [
       {
         entryPoint: { name: 'handleDeleteUser', filePath: 'src/routes/users.ts', line: 30 },
-        sink: { name: 'execute', filePath: 'src/db/queries.ts', line: 25, type: 'database' },
-        path: ['handleDeleteUser', 'execute'],
+        sink: { name: 'executeRaw', filePath: 'src/db/queries.ts', line: 25, type: 'database' },
+        path: ['handleDeleteUser', 'executeRaw'],
         hasValidation: false,
       },
     ];
@@ -396,7 +396,7 @@ describe('queryResultsToFindings', () => {
     expect(findings[0].file).toBe('src/routes/users.ts');
     expect(findings[0].line).toBe(30);
     expect(findings[0].description).toContain('handleDeleteUser');
-    expect(findings[0].description).toContain('execute');
+    expect(findings[0].description).toContain('executeRaw');
     expect(findings[0].auto_fixable).toBe(false);
   });
 
@@ -404,8 +404,8 @@ describe('queryResultsToFindings', () => {
     const attackPaths: AttackPath[] = [
       {
         entryPoint: { name: 'handleGetUser', filePath: 'src/routes/users.ts', line: 10 },
-        sink: { name: 'query', filePath: 'src/db/queries.ts', line: 10, type: 'database' },
-        path: ['handleGetUser', 'validateInput', 'query'],
+        sink: { name: 'executeQuery', filePath: 'src/db/queries.ts', line: 10, type: 'database' },
+        path: ['handleGetUser', 'validateInput', 'executeQuery'],
         hasValidation: true,
       },
     ];
@@ -417,8 +417,8 @@ describe('queryResultsToFindings', () => {
     const attackPaths: AttackPath[] = [
       {
         entryPoint: { name: 'handleExec', filePath: 'src/api.ts', line: 5 },
-        sink: { name: 'exec', filePath: 'src/utils.ts', line: 10, type: 'shell' },
-        path: ['handleExec', 'exec'],
+        sink: { name: 'execSync', filePath: 'src/utils.ts', line: 10, type: 'shell' },
+        path: ['handleExec', 'execSync'],
         hasValidation: false,
       },
     ];
@@ -450,8 +450,8 @@ describe('queryResultsToFindings', () => {
     const attackPaths: AttackPath[] = [
       {
         entryPoint: { name: 'handleDeleteUser', filePath: 'src/routes/users.ts', line: 30 },
-        sink: { name: 'execute', filePath: 'src/db/queries.ts', line: 25, type: 'database' },
-        path: ['handleDeleteUser', 'execute'],
+        sink: { name: 'executeRaw', filePath: 'src/db/queries.ts', line: 25, type: 'database' },
+        path: ['handleDeleteUser', 'executeRaw'],
         hasValidation: false,
       },
     ];
@@ -478,14 +478,14 @@ describe('queryResultsToFindings', () => {
     const attackPaths: AttackPath[] = [
       {
         entryPoint: { name: 'handleA', filePath: 'a.ts', line: 1 },
-        sink: { name: 'execute', filePath: 'b.ts', line: 2, type: 'database' },
-        path: ['handleA', 'execute'],
+        sink: { name: 'executeRaw', filePath: 'b.ts', line: 2, type: 'database' },
+        path: ['handleA', 'executeRaw'],
         hasValidation: false,
       },
       {
         entryPoint: { name: 'handleB', filePath: 'c.ts', line: 3 },
-        sink: { name: 'raw', filePath: 'd.ts', line: 4, type: 'database' },
-        path: ['handleB', 'raw'],
+        sink: { name: 'queryRaw', filePath: 'd.ts', line: 4, type: 'database' },
+        path: ['handleB', 'queryRaw'],
         hasValidation: false,
       },
     ];

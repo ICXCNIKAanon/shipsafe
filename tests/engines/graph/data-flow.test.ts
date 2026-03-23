@@ -15,16 +15,16 @@ describe('classifySource', () => {
     expect(classifySource('getRequestBody')).toBe('user_input');
   });
 
-  it('returns user_input for req-prefixed names', () => {
-    expect(classifySource('reqData')).toBe('user_input');
+  it('returns user_input for parseRequest', () => {
+    expect(classifySource('parseRequest')).toBe('user_input');
   });
 
-  it('returns user_input for functions containing "body"', () => {
-    expect(classifySource('parseBody')).toBe('user_input');
+  it('returns user_input for functions containing "getBody"', () => {
+    expect(classifySource('getBody')).toBe('user_input');
   });
 
-  it('returns user_input for functions containing "params"', () => {
-    expect(classifySource('getParams')).toBe('user_input');
+  it('returns user_input for readInput', () => {
+    expect(classifySource('readInput')).toBe('user_input');
   });
 
   it('returns user_input for functions containing "formData"', () => {
@@ -42,8 +42,8 @@ describe('classifySource', () => {
 });
 
 describe('classifySink', () => {
-  it('returns database for query', () => {
-    expect(classifySink('query')).toBe('database');
+  it('returns database for executeQuery', () => {
+    expect(classifySink('executeQuery')).toBe('database');
   });
 
   it('returns shell for exec', () => {
@@ -75,18 +75,18 @@ describe('classifySink', () => {
 // File: src/api/users.ts
 //   - getRequestBody() [exported] -- SOURCE (user_input)
 //   - processUserInput() [exported] -- calls getRequestBody, then calls buildQuery
-//   - buildQuery() [exported] -- calls query (SINK)
+//   - buildQuery() [exported] -- calls executeQuery (SINK)
 //
 // File: src/db/db.ts
-//   - query() -- SINK (database)
+//   - executeQuery() -- SINK (database)
 //
 // File: src/api/safe.ts
-//   - readLine() [exported] -- SOURCE (user_input)
+//   - readInput() [exported] -- SOURCE (user_input)
 //   - sanitizeInput() [exported] -- SANITIZER -- called by safeHandler
-//   - safeHandler() [exported] -- calls readLine, calls sanitizeInput, calls exec (SINK)
+//   - safeHandler() [exported] -- calls readInput, calls sanitizeInput, calls execSync (SINK)
 //
 // File: src/utils/shell.ts
-//   - exec() -- SINK (shell)
+//   - execSync() -- SINK (shell)
 
 const mockParsedFiles: ParsedFile[] = [
   {
@@ -143,7 +143,7 @@ const mockParsedFiles: ParsedFile[] = [
       },
       {
         callerName: 'buildQuery',
-        calleeName: 'query',
+        calleeName: 'executeQuery',
         filePath: 'src/api/users.ts',
         line: 40,
       },
@@ -154,7 +154,7 @@ const mockParsedFiles: ParsedFile[] = [
     language: 'typescript',
     functions: [
       {
-        name: 'query',
+        name: 'executeQuery',
         filePath: 'src/db/db.ts',
         startLine: 10,
         endLine: 20,
@@ -165,7 +165,7 @@ const mockParsedFiles: ParsedFile[] = [
     ],
     classes: [],
     imports: [],
-    exports: [{ name: 'query', filePath: 'src/db/db.ts', line: 10, type: 'function' }],
+    exports: [{ name: 'executeQuery', filePath: 'src/db/db.ts', line: 10, type: 'function' }],
     callSites: [],
   },
   {
@@ -173,7 +173,7 @@ const mockParsedFiles: ParsedFile[] = [
     language: 'typescript',
     functions: [
       {
-        name: 'readLine',
+        name: 'readInput',
         filePath: 'src/api/safe.ts',
         startLine: 5,
         endLine: 10,
@@ -203,14 +203,14 @@ const mockParsedFiles: ParsedFile[] = [
     classes: [],
     imports: [],
     exports: [
-      { name: 'readLine', filePath: 'src/api/safe.ts', line: 5, type: 'function' },
+      { name: 'readInput', filePath: 'src/api/safe.ts', line: 5, type: 'function' },
       { name: 'sanitizeInput', filePath: 'src/api/safe.ts', line: 15, type: 'function' },
       { name: 'safeHandler', filePath: 'src/api/safe.ts', line: 30, type: 'function' },
     ],
     callSites: [
       {
         callerName: 'safeHandler',
-        calleeName: 'readLine',
+        calleeName: 'readInput',
         filePath: 'src/api/safe.ts',
         line: 33,
       },
@@ -222,7 +222,7 @@ const mockParsedFiles: ParsedFile[] = [
       },
       {
         callerName: 'safeHandler',
-        calleeName: 'exec',
+        calleeName: 'execSync',
         filePath: 'src/api/safe.ts',
         line: 40,
       },
@@ -233,7 +233,7 @@ const mockParsedFiles: ParsedFile[] = [
     language: 'typescript',
     functions: [
       {
-        name: 'exec',
+        name: 'execSync',
         filePath: 'src/utils/shell.ts',
         startLine: 5,
         endLine: 15,
@@ -244,7 +244,7 @@ const mockParsedFiles: ParsedFile[] = [
     ],
     classes: [],
     imports: [],
-    exports: [{ name: 'exec', filePath: 'src/utils/shell.ts', line: 5, type: 'function' }],
+    exports: [{ name: 'execSync', filePath: 'src/utils/shell.ts', line: 5, type: 'function' }],
     callSites: [],
   },
 ];
@@ -274,25 +274,25 @@ describe('findDataFlows (graph-based)', () => {
 
     expect(flows.length).toBeGreaterThan(0);
 
-    // Find the flow from getRequestBody to query
+    // Find the flow from getRequestBody to executeQuery
     const dbFlow = flows.find(
-      (f) => f.source.name === 'getRequestBody' && f.sink.name === 'query',
+      (f) => f.source.name === 'getRequestBody' && f.sink.name === 'executeQuery',
     );
     expect(dbFlow).toBeDefined();
     expect(dbFlow!.source.type).toBe('user_input');
     expect(dbFlow!.sink.type).toBe('database');
     expect(dbFlow!.path).toContain('getRequestBody');
-    expect(dbFlow!.path).toContain('query');
+    expect(dbFlow!.path).toContain('executeQuery');
     expect(dbFlow!.hasSanitization).toBe(false);
   });
 
   it('marks flows with sanitizers as hasSanitization: true', async () => {
     const flows = await findDataFlows(store);
 
-    // readLine (source) -> safeHandler calls sanitizeInput (sanitizer) and exec (sink)
-    // The path readLine -> safeHandler -> exec contains sanitizeInput in the call chain
+    // readInput (source) -> safeHandler calls sanitizeInput (sanitizer) and execSync (sink)
+    // The path readInput -> safeHandler -> execSync contains sanitizeInput in the call chain
     const shellFlow = flows.find(
-      (f) => f.source.name === 'readLine' && f.sink.name === 'exec',
+      (f) => f.source.name === 'readInput' && f.sink.name === 'execSync',
     );
     expect(shellFlow).toBeDefined();
     expect(shellFlow!.hasSanitization).toBe(true);

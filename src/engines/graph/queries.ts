@@ -3,25 +3,37 @@ import type { Finding, AttackPath, BlastRadiusResult, MissingAuthResult } from '
 
 // ── Constants ──
 
-const ENTRY_POINT_PATTERNS = ['handle', 'route', 'controller', 'api', 'endpoint'];
+const ENTRY_POINT_PATTERNS = ['handle', 'route', 'controller', 'endpoint'];
 
+// Sinks must be specific enough to avoid matching common JS methods like Array.find()
 const SINK_PATTERNS: Record<string, string[]> = {
-  database: ['query', 'execute', 'exec', 'find', 'insert', 'update', 'delete', 'raw'],
-  filesystem: ['readFile', 'writeFile', 'unlink', 'createReadStream', 'open'],
-  shell: ['exec', 'execSync', 'spawn', 'execFile'],
-  network: ['fetch', 'axios', 'request', 'http.get'],
+  database: [
+    // Must include receiver context — plain "find"/"delete" are too generic
+    'executeQuery', 'executeRaw', 'executeSql',
+    'queryRaw', 'queryRawUnsafe', '$queryRaw', '$queryRawUnsafe',
+    '$executeRaw', '$executeRawUnsafe',
+    'rawQuery', 'runQuery',
+  ],
+  filesystem: ['readFileSync', 'writeFileSync', 'readFile', 'writeFile', 'unlinkSync', 'createReadStream', 'createWriteStream'],
+  shell: ['execSync', 'execFileSync', 'spawnSync', 'childExec', 'childSpawn'],
+  network: ['fetchUrl', 'httpGet', 'httpPost', 'axiosGet', 'axiosPost'],
+  eval: ['eval', 'Function'],
 };
 
-const VALIDATOR_PATTERNS = ['valid', 'sanitiz', 'escape', 'clean', 'check', 'verify', 'auth'];
+const VALIDATOR_PATTERNS = ['valid', 'sanitiz', 'escape', 'clean', 'verify', 'auth', 'protect', 'guard', 'middleware'];
 
 // ── Helpers ──
 
 function isEntryPoint(fn: GraphFunction): boolean {
   const nameLower = fn.name.toLowerCase();
-  return (
-    fn.isExported &&
-    (ENTRY_POINT_PATTERNS.some((p) => nameLower.includes(p)) || fn.isAsync)
-  );
+  // Must be exported AND match a handler-like name pattern
+  // Plain async functions are NOT entry points (too broad for Next.js apps)
+  if (!fn.isExported) return false;
+  return ENTRY_POINT_PATTERNS.some((p) => nameLower.includes(p)) ||
+    // Also match common HTTP method handlers
+    /^(get|post|put|patch|delete|head|options)$/i.test(fn.name) ||
+    // Next.js API route handlers
+    /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(fn.name);
 }
 
 function classifySink(name: string): string | null {
@@ -60,9 +72,7 @@ export async function findAttackPaths(store: GraphStore): Promise<AttackPath[]> 
   // Step 1: Get all functions to identify entry points
   const allFunctions = store.getAllFunctions();
 
-  const entryPoints = allFunctions.filter((fn) => {
-    return fn.isExported && (isHandlerLike(fn.name) || fn.isAsync);
-  });
+  const entryPoints = allFunctions.filter((fn) => isEntryPoint(fn));
 
   const attackPaths: AttackPath[] = [];
 

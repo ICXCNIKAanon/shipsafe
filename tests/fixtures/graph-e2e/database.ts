@@ -1,10 +1,10 @@
 // Simulated database module
 
-export function query(sql: string, params?: any[]): any {
+export function executeQuery(sql: string, params?: any[]): any {
   // In a real app, this would execute SQL
   return [];
 }
 
-export function execute(sql: string): void {
-  // Execute a statement
+export function executeRaw(sql: string): void {
+  // Execute a raw statement
 }

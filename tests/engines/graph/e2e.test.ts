@@ -39,8 +39,8 @@ describe('Graph engine end-to-end (real files)', () => {
     expect(names).toContain('sanitize');
 
     // database.ts
-    expect(names).toContain('query');
-    expect(names).toContain('execute');
+    expect(names).toContain('executeQuery');
+    expect(names).toContain('executeRaw');
 
     // auth.ts
     expect(names).toContain('checkAuth');
@@ -60,10 +60,10 @@ describe('Graph engine end-to-end (real files)', () => {
 
   // ── Call graph verification ──
 
-  it('detects that handleUserSearch calls query', async () => {
+  it('detects that handleUserSearch calls executeQuery', async () => {
     const callees = await store.getCallees('handleUserSearch', 1);
     const names = callees.map((c) => c.name);
-    expect(names).toContain('query');
+    expect(names).toContain('executeQuery');
   });
 
   it('detects that handleSecureUpdate calls checkAuth', async () => {
@@ -72,8 +72,8 @@ describe('Graph engine end-to-end (real files)', () => {
     expect(names).toContain('checkAuth');
   });
 
-  it('getCallers finds handler functions that call query', async () => {
-    const callers = await store.getCallers('query', 1);
+  it('getCallers finds handler functions that call executeQuery', async () => {
+    const callers = await store.getCallers('executeQuery', 1);
     const names = callers.map((c) => c.name);
     expect(names).toContain('handleUserSearch');
     expect(names).toContain('handleDeleteUser');
@@ -86,20 +86,20 @@ describe('Graph engine end-to-end (real files)', () => {
     const paths = await findAttackPaths(store);
     expect(paths.length).toBeGreaterThan(0);
 
-    // handleUserSearch -> query (direct, no validation)
+    // handleUserSearch -> executeQuery (direct, no validation)
     const searchPath = paths.find(
-      (p) => p.entryPoint.name === 'handleUserSearch' && p.sink.name === 'query',
+      (p) => p.entryPoint.name === 'handleUserSearch' && p.sink.name === 'executeQuery',
     );
     expect(searchPath).toBeDefined();
     expect(searchPath!.hasValidation).toBe(false);
     expect(searchPath!.sink.type).toBe('database');
   });
 
-  it('finds attack path from handleDeleteUser to query (no auth)', async () => {
+  it('finds attack path from handleDeleteUser to executeQuery (no auth)', async () => {
     const paths = await findAttackPaths(store);
 
     const deletePath = paths.find(
-      (p) => p.entryPoint.name === 'handleDeleteUser' && p.sink.name === 'query',
+      (p) => p.entryPoint.name === 'handleDeleteUser' && p.sink.name === 'executeQuery',
     );
     expect(deletePath).toBeDefined();
     expect(deletePath!.hasValidation).toBe(false);
@@ -107,10 +107,10 @@ describe('Graph engine end-to-end (real files)', () => {
 
   // ── Blast radius ──
 
-  it('computes blast radius for query function', async () => {
-    const result = await findBlastRadius(store, 'query');
+  it('computes blast radius for executeQuery function', async () => {
+    const result = await findBlastRadius(store, 'executeQuery');
 
-    expect(result.targetFunction).toBe('query');
+    expect(result.targetFunction).toBe('executeQuery');
     expect(result.totalAffected).toBeGreaterThanOrEqual(2);
 
     const affectedNames = result.affectedFunctions.map((f) => f.name);
@@ -139,9 +139,9 @@ describe('Graph engine end-to-end (real files)', () => {
   it('finds tainted data flows from request sources to sinks', async () => {
     const flows = await findDataFlows(store);
 
-    // handleUserSearch reads req.query (source) and calls query (sink)
-    // The exact flow depends on whether 'query' as a callee name is also
-    // matched as a source pattern. Let's check for any flow reaching 'query' sink.
+    // handleUserSearch calls executeQuery (sink)
+    // The exact flow depends on whether source patterns are matched.
+    // Let's check for any flow reaching a database sink.
     const dbFlows = flows.filter((f) => f.sink.type === 'database');
     // There should be at least some data flows detected
     expect(flows.length).toBeGreaterThanOrEqual(0);

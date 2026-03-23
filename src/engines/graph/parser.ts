@@ -91,7 +91,7 @@ export async function parseProject(
     throw new Error('Parser not initialized. Call initParser() first.');
   }
 
-  const defaultExclude = ['node_modules', 'dist', '.git', 'coverage'];
+  const defaultExclude = ['node_modules', 'dist', '.git', 'coverage', '.next', '.nuxt', 'build', '__pycache__', '.venv', '.turbo'];
   const excludePatterns = options?.exclude ?? [];
   const includePatterns = options?.include ?? [];
 

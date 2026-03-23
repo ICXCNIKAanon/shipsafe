@@ -3,25 +3,23 @@ import type { GraphStore, GraphFunction } from './store.js';
 // ── Constants ──
 
 const SOURCE_PATTERNS = [
-  'request',
-  'req',
-  'body',
-  'params',
-  'query',
+  'parserequest',
+  'getbody',
   'getrequestbody',
-  'readline',
-  'input',
-  'formdata',
+  'readinput',
+  'parseformdata',
+  'parseinput',
+  'readuserinput',
 ];
 
 const SINK_PATTERNS: Record<string, string[]> = {
-  database: ['query', 'execute', 'exec', 'find', 'insert', 'update', 'delete', 'raw'],
-  filesystem: ['writefile', 'spawn'],
-  shell: ['exec', 'spawn'],
-  eval: ['eval', 'function'],
+  database: ['executequery', 'executeraw', 'executesql', 'queryraw', 'queryrawunsafe', 'runquery'],
+  filesystem: ['writefilesync', 'writefile', 'createwritestream'],
+  shell: ['execsync', 'execfilesync', 'spawnsync'],
+  eval: ['eval'],
 };
 
-const SANITIZER_PATTERNS = ['valid', 'sanitiz', 'escape', 'clean', 'encode', 'parameteriz', 'prepare'];
+const SANITIZER_PATTERNS = ['valid', 'sanitiz', 'escape', 'clean', 'encode', 'parameteriz', 'prepare', 'guard', 'protect'];
 
 const MAX_DEPTH = 8;
 

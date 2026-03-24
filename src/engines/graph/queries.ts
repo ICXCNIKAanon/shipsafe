@@ -77,15 +77,26 @@ const VALIDATOR_PATTERNS = ['valid', 'sanitiz', 'escape', 'clean', 'verify', 'au
 // ── Helpers ──
 
 function isEntryPoint(fn: GraphFunction): boolean {
-  const nameLower = fn.name.toLowerCase();
-  // Must be exported AND match a handler-like name pattern
-  // Plain async functions are NOT entry points (too broad for Next.js apps)
   if (!fn.isExported) return false;
-  return ENTRY_POINT_PATTERNS.some((p) => nameLower.includes(p)) ||
-    // Also match common HTTP method handlers
-    /^(get|post|put|patch|delete|head|options)$/i.test(fn.name) ||
-    // Next.js API route handlers
-    /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(fn.name);
+
+  // Next.js API route handlers: files in /api/ or /app/ ending with route.ts/js
+  if (/\/api\/.*route\.(ts|js)$/.test(fn.filePath) || /\/app\/.*route\.(ts|js)$/.test(fn.filePath)) {
+    if (/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(fn.name)) return true;
+  }
+
+  // Next.js API routes: uppercase HTTP method in any /api/ or /app/ file
+  if (fn.filePath.includes('/api/') || fn.filePath.includes('/app/')) {
+    if (/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(fn.name)) return true;
+  }
+
+  // Server actions: files in /actions/ directory or function names containing 'action'
+  if (fn.filePath.includes('/actions/') || fn.name.toLowerCase().includes('action')) return true;
+
+  // Express/Fastify handler patterns (handle*, route*, controller*, endpoint*)
+  if (ENTRY_POINT_PATTERNS.some((p) => fn.name.toLowerCase().includes(p))) return true;
+
+  // Don't treat random exported async functions as entry points
+  return false;
 }
 
 /**

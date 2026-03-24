@@ -1,5 +1,6 @@
 import { fixHardcodedSecret } from '../../autofix/secret-fixer.js';
 import { fixSqlInjectionInFile } from '../../autofix/sql-fixer.js';
+import { fixXssInFile } from '../../autofix/xss-fixer.js';
 import { fixMissingHelmet, fixMissingRateLimit } from '../../autofix/middleware-fixer.js';
 import { generateFix, type ProcessedError } from '../../autofix/pr-generator.js';
 import * as fs from 'node:fs/promises';
@@ -125,6 +126,43 @@ export async function handleFix(params: FixParams): Promise<FixResult> {
         status: 'fixed',
         files_modified: result.filesModified,
         description: `Converted SQL injection to parameterized query (${result.paramStyle} style) with params [${result.params.join(', ')}]`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        status: 'suggestion_only',
+        files_modified: [],
+        description: `Auto-fix failed: ${message}. Apply fix manually: ${finding.fix_suggestion}`,
+      };
+    }
+  }
+
+  // For XSS findings (dangerouslySetInnerHTML, innerHTML, eval), use the xss-fixer
+  const xssTypes = [
+    'XSS_DANGEROUSLY_SET_INNERHTML',
+    'REACT_DANGEROUSLYSETINNERHTML_VARIABLE',
+    'RSC_DANGEROUSLY_SET_DB_DATA',
+    'XSS_INNERHTML',
+    'DOM_XSS_INNERHTML_ASSIGN',
+    'XSS_EVAL',
+  ];
+  if (strategy === 'suggested' && xssTypes.includes(finding.type)) {
+    try {
+      const result = await fixXssInFile({
+        id: finding.id,
+        engine: 'pattern',
+        severity: 'high',
+        type: finding.type,
+        file: finding.file,
+        line: finding.line,
+        description: finding.description,
+        fix_suggestion: finding.fix_suggestion,
+        auto_fixable: finding.auto_fixable,
+      });
+      return {
+        status: 'fixed',
+        files_modified: result.filesModified,
+        description: result.description,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

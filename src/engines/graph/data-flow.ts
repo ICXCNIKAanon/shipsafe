@@ -12,11 +12,51 @@ const SOURCE_PATTERNS = [
   'readuserinput',
 ];
 
-const SINK_PATTERNS: Record<string, string[]> = {
-  database: ['executequery', 'executeraw', 'executesql', 'queryraw', 'queryrawunsafe', 'runquery'],
-  filesystem: ['writefilesync', 'writefile', 'createwritestream'],
-  shell: ['execsync', 'execfilesync', 'spawnsync'],
-  eval: ['eval'],
+// Receiver-aware sink patterns for data-flow taint analysis.
+// If `receivers` is specified, the method is only a sink when called on one of those receivers.
+// If `receivers` is omitted, any call to that method name is treated as a sink.
+interface SinkPattern {
+  method: string;
+  receivers?: string[];
+}
+
+const SINK_PATTERNS: Record<string, SinkPattern[]> = {
+  database: [
+    { method: 'query', receivers: ['db', 'pool', 'client', 'connection', 'knex', 'sequelize', 'prisma'] },
+    { method: 'execute', receivers: ['db', 'pool', 'client', 'connection', 'cursor', 'stmt'] },
+    { method: 'exec', receivers: ['db', 'connection'] },
+    { method: 'run', receivers: ['db', 'sqlite', 'better-sqlite'] },
+    { method: 'raw', receivers: ['knex', 'db'] },
+    { method: 'find', receivers: ['collection', 'model', 'db'] },
+    { method: 'findOne', receivers: ['collection', 'model', 'db'] },
+    { method: 'insert', receivers: ['collection', 'db', 'knex'] },
+    { method: 'update', receivers: ['collection', 'db', 'knex'] },
+    { method: 'delete', receivers: ['collection', 'db', 'knex'] },
+    // Always-dangerous patterns (no receiver needed)
+    { method: 'executeQuery' },
+    { method: 'executeRaw' },
+    { method: 'executeSql' },
+    { method: 'queryRaw' },
+    { method: 'queryRawUnsafe' },
+    { method: 'runQuery' },
+  ],
+  filesystem: [
+    { method: 'writeFile' },
+    { method: 'writeFileSync' },
+    { method: 'createWriteStream' },
+  ],
+  shell: [
+    { method: 'exec', receivers: ['child_process', 'cp'] },
+    { method: 'execSync', receivers: ['child_process', 'cp'] },
+    { method: 'execSync' },  // also match bare execSync (imported directly)
+    { method: 'spawn', receivers: ['child_process', 'cp'] },
+    { method: 'execFile', receivers: ['child_process', 'cp'] },
+    { method: 'execFileSync' },
+    { method: 'spawnSync' },
+  ],
+  eval: [
+    { method: 'eval' },
+  ],
 };
 
 const SANITIZER_PATTERNS = ['valid', 'sanitiz', 'escape', 'clean', 'encode', 'parameteriz', 'prepare', 'guard', 'protect'];
@@ -55,34 +95,30 @@ export function classifySource(name: string): string | null {
   return null;
 }
 
-/** Classify a function name as a taint sink type, or null if not a sink. */
-export function classifySink(name: string): string | null {
+/**
+ * Classify a function call as a taint sink type, with optional receiver awareness.
+ * If receiver is provided, patterns with a `receivers` list will only match
+ * when the receiver is in that list. Patterns without `receivers` always match.
+ */
+export function classifySink(name: string, receiver?: string): string | null {
   const nameLower = name.toLowerCase();
-
-  // Prioritize more specific types: eval > shell > filesystem > database
-  // Check eval first
-  if (nameLower === 'eval' || nameLower === 'function') {
-    return 'eval';
-  }
-
-  // shell: spawn, exec (but not execute/execSync -- those go to database/shell)
-  // exec is both shell and database -- shell takes priority
-  if (nameLower === 'exec' || nameLower === 'execsync' || nameLower === 'spawn' || nameLower === 'execfile') {
-    return 'shell';
-  }
-
-  // filesystem
-  if (nameLower === 'writefile') {
-    return 'filesystem';
-  }
-
-  // database
-  for (const pattern of SINK_PATTERNS['database']!) {
-    if (nameLower === pattern.toLowerCase()) {
-      return 'database';
+  const receiverLower = receiver?.toLowerCase();
+  for (const [type, patterns] of Object.entries(SINK_PATTERNS)) {
+    for (const pattern of patterns) {
+      if (nameLower === pattern.method.toLowerCase()) {
+        if (pattern.receivers) {
+          // Receiver-gated: only match if receiver is in the allowed list
+          if (receiverLower && pattern.receivers.some((r) => receiverLower === r.toLowerCase())) {
+            return type;
+          }
+          // No receiver or receiver not in list: skip this pattern (but continue checking others)
+          continue;
+        }
+        // No receiver restriction: always match
+        return type;
+      }
     }
   }
-
   return null;
 }
 
@@ -140,7 +176,7 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
         isSanitizer(caller.name) ||
         allCalleesOfCaller.some((fn) => isSanitizer(fn.name));
 
-      // BFS from caller, following callees up to MAX_DEPTH
+      // BFS from caller, following call edges (with receiver info) up to MAX_DEPTH
       interface BFSNode {
         fn: GraphFunction;
         path: string[]; // function names from source to current
@@ -163,47 +199,21 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
         const node = queue.shift()!;
         const { fn, path, depth } = node;
 
-        // Check if current function is itself a sink
-        const sinkType = classifySink(fn.name);
-        if (sinkType !== null) {
-          const key = `${sourceName}:${fn.name}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            results.push({
-              source: {
-                name: sourceName,
-                filePath: sourceFn.filePath,
-                line: sourceFn.startLine,
-                type: sourceType,
-              },
-              sink: {
-                name: fn.name,
-                filePath: fn.filePath,
-                line: fn.startLine,
-                type: sinkType,
-              },
-              path,
-              hasSanitization: callerHasSanitizerInScope,
-            });
-          }
-          // Don't continue BFS past a sink
-          continue;
-        }
-
         if (depth >= MAX_DEPTH) continue;
 
-        // Get direct callees of current function
-        const callees = await store.getCallees(fn.name, 1);
-        for (const callee of callees) {
-          if (visited.has(callee.name)) continue;
-          visited.add(callee.name);
+        // Get direct call edges from current function (with receiver info)
+        const edges = store.getCallEdgesFrom(fn.name);
+        for (const edge of edges) {
+          if (visited.has(edge.calleeName)) continue;
+          visited.add(edge.calleeName);
 
-          const calleeSinkType = classifySink(callee.name);
-          const newPath = [...path, callee.name];
+          const calleeSinkType = classifySink(edge.calleeName, edge.receiver);
+          const newPath = [...path, edge.calleeName];
 
           if (calleeSinkType !== null) {
             // Found a sink!
-            const key = `${sourceName}:${callee.name}`;
+            const calleeFn = await store.getFunction(edge.calleeName);
+            const key = `${sourceName}:${edge.calleeName}`;
             if (!seen.has(key)) {
               seen.add(key);
               results.push({
@@ -214,9 +224,9 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
                   type: sourceType,
                 },
                 sink: {
-                  name: callee.name,
-                  filePath: callee.filePath,
-                  line: callee.startLine,
+                  name: edge.calleeName,
+                  filePath: calleeFn?.filePath ?? edge.filePath,
+                  line: calleeFn?.startLine ?? edge.line,
                   type: calleeSinkType,
                 },
                 path: newPath,
@@ -224,11 +234,14 @@ export async function findDataFlows(store: GraphStore): Promise<DataFlowResult[]
               });
             }
           } else {
-            queue.push({
-              fn: callee,
-              path: newPath,
-              depth: depth + 1,
-            });
+            const calleeFn = await store.getFunction(edge.calleeName);
+            if (calleeFn) {
+              queue.push({
+                fn: calleeFn,
+                path: newPath,
+                depth: depth + 1,
+              });
+            }
           }
         }
       }

@@ -11,6 +11,7 @@ export interface SetupOptions {
   skipMcp?: boolean;
   skipClaudeMd?: boolean;
   commitOnly?: boolean;
+  withPrePush?: boolean;
 }
 
 const MCP_SERVER_ENTRY = {
@@ -100,8 +101,8 @@ export async function handleSetupAction(options: SetupOptions): Promise<void> {
   // Step 1: Install git hooks
   if (!options.skipHooks) {
     try {
-      await installHooks(projectDir, { commitOnly: options.commitOnly });
-      const hookMsg = options.commitOnly ? 'Git pre-commit hook installed (pre-push skipped)' : 'Git hooks installed';
+      await installHooks(projectDir, { withPrePush: options.withPrePush, commitOnly: options.commitOnly });
+      const hookMsg = options.withPrePush ? 'Git hooks installed (pre-commit + pre-push)' : 'Git pre-commit hook installed';
       console.log(chalk.green('✓') + ' ' + hookMsg);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -141,12 +142,14 @@ export function registerSetupCommand(program: Command): void {
     .option('--skip-hooks', 'Skip git hook installation')
     .option('--skip-mcp', 'Skip MCP server registration')
     .option('--skip-claude-md', 'Skip CLAUDE.md injection')
-    .option('--commit-only', 'Only install pre-commit hook, skip pre-push hook')
+    .option('--with-pre-push', 'Also install pre-push hook (full scan before push)')
+    .option('--commit-only', 'Only install pre-commit hook (default behavior)')
     .action(async (options) => {
       await handleSetupAction({
         skipHooks: options.skipHooks,
         skipMcp: options.skipMcp,
         skipClaudeMd: options.skipClaudeMd,
+        withPrePush: options.withPrePush,
         commitOnly: options.commitOnly,
       });
     });

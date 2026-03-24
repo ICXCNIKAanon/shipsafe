@@ -44,6 +44,17 @@ export interface GraphImport {
   specifiers: string[];
 }
 
+/** A resolved call edge with receiver information from the call site. */
+export interface CallEdgeInfo {
+  callerId: string;
+  callerName: string;
+  calleeId: string;
+  calleeName: string;
+  receiver?: string;
+  filePath: string;
+  line: number;
+}
+
 export interface GraphStore {
   /** Populate the graph from parsed files. */
   buildGraph(parsedFiles: ParsedFile[]): Promise<void>;
@@ -56,6 +67,10 @@ export interface GraphStore {
 
   /** Find functions called by the target (transitive up to depth). */
   getCallees(functionName: string, depth?: number): Promise<GraphFunction[]>;
+
+  /** Get direct call edges originating from a given function (by name).
+   *  Returns edges with receiver info for receiver-aware sink classification. */
+  getCallEdgesFrom(functionName: string): CallEdgeInfo[];
 
   /** Get all files that import a given module path. */
   getImportsOf(modulePath: string): Promise<GraphImport[]>;
@@ -95,7 +110,7 @@ export async function createGraphStore(_dbPath?: string): Promise<GraphStore> {
   const modules = new Map<string, GraphModule>();       // name -> GraphModule
 
   // Edge storage
-  const callEdges: Array<{ callerId: string; calleeId: string }> = [];
+  const callEdges: Array<{ callerId: string; calleeId: string; receiver?: string; filePath: string; line: number }> = [];
   const containsEdges: Array<{ filePath: string; functionId: string }> = [];
   const containsClassEdges: Array<{ filePath: string; classId: string }> = [];
   const hasMethodEdges: Array<{ classId: string; functionId: string }> = [];
@@ -105,6 +120,8 @@ export async function createGraphStore(_dbPath?: string): Promise<GraphStore> {
   const functionsByName = new Map<string, GraphFunction[]>(); // name -> GraphFunction[]
   const callerIndex = new Map<string, Set<string>>();          // calleeId -> Set<callerId>
   const calleeIndex = new Map<string, Set<string>>();          // callerId -> Set<calleeId>
+  // Index for call edges by caller function name (for receiver-aware queries)
+  const callEdgesByCallerName = new Map<string, CallEdgeInfo[]>();
 
   function addToNameIndex(fn: GraphFunction): void {
     const list = functionsByName.get(fn.name) ?? [];
@@ -217,7 +234,7 @@ export async function createGraphStore(_dbPath?: string): Promise<GraphStore> {
 
         if (!calleeId) continue; // External or unresolved call
 
-        callEdges.push({ callerId, calleeId });
+        callEdges.push({ callerId, calleeId, receiver: call.receiver, filePath: call.filePath, line: call.line });
 
         // Update indexes
         if (!callerIndex.has(calleeId)) {
@@ -229,6 +246,24 @@ export async function createGraphStore(_dbPath?: string): Promise<GraphStore> {
           calleeIndex.set(callerId, new Set());
         }
         calleeIndex.get(callerId)!.add(calleeId);
+
+        // Build call-edge-by-caller-name index
+        const callerFnObj = functions.get(callerId);
+        const calleeFnObj = functions.get(calleeId);
+        if (callerFnObj && calleeFnObj) {
+          const edgeInfo: CallEdgeInfo = {
+            callerId,
+            callerName: callerFnObj.name,
+            calleeId,
+            calleeName: calleeFnObj.name,
+            receiver: call.receiver,
+            filePath: call.filePath,
+            line: call.line,
+          };
+          const existingEdges = callEdgesByCallerName.get(callerFnObj.name) ?? [];
+          existingEdges.push(edgeInfo);
+          callEdgesByCallerName.set(callerFnObj.name, existingEdges);
+        }
       }
     }
   }
@@ -535,6 +570,12 @@ export async function createGraphStore(_dbPath?: string): Promise<GraphStore> {
     return [];
   }
 
+  // ── getCallEdgesFrom ──
+
+  function getCallEdgesFrom(functionName: string): CallEdgeInfo[] {
+    return callEdgesByCallerName.get(functionName) ?? [];
+  }
+
   // ── close ──
 
   async function close(): Promise<void> {
@@ -546,6 +587,7 @@ export async function createGraphStore(_dbPath?: string): Promise<GraphStore> {
     getFunction,
     getCallers,
     getCallees,
+    getCallEdgesFrom,
     getImportsOf,
     query: queryFn,
     getAllFunctions,

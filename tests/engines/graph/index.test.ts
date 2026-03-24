@@ -138,6 +138,7 @@ function makeMockStore() {
     getFunction: vi.fn().mockResolvedValue(null),
     getCallers: vi.fn().mockResolvedValue([]),
     getCallees: vi.fn().mockResolvedValue([]),
+    getCallEdgesFrom: vi.fn().mockReturnValue([]),
     getImportsOf: vi.fn().mockResolvedValue([]),
     query: vi.fn().mockResolvedValue([]),
     getAllFunctions: vi.fn().mockReturnValue([]),

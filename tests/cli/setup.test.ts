@@ -81,7 +81,7 @@ describe('handleSetupAction', () => {
     await handleSetupAction({});
 
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('Git hooks installed');
+    expect(output).toContain('Git pre-commit hook installed');
     expect(output).toContain('MCP server registered');
     expect(output).toContain('CLAUDE.md updated');
   });

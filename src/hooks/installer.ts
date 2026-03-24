@@ -70,14 +70,18 @@ async function getHooksDir(projectDir: string): Promise<string> {
 }
 
 export interface InstallHooksOptions {
-  /** When true, only install the pre-commit hook; skip pre-push. Default: false (install both). */
+  /** When true, also install the pre-push hook (full scan before push). Default: false (pre-commit only). */
+  withPrePush?: boolean;
+  /** @deprecated Use withPrePush instead. When true, only install pre-commit. */
   commitOnly?: boolean;
 }
 
 export async function installHooks(projectDir?: string, options?: InstallHooksOptions): Promise<void> {
   const dir = projectDir ?? process.cwd();
   const hooksDir = await getHooksDir(dir);
-  const commitOnly = options?.commitOnly ?? false;
+  // Default: pre-commit only. Opt in to pre-push with --with-pre-push.
+  // @ts-expect-error — intentional: `!options?.withPrePush` is never nullish, but the fallback chain reads naturally
+  const commitOnly = options?.commitOnly ?? !options?.withPrePush ?? true;
 
   await fs.mkdir(hooksDir, { recursive: true });
 

@@ -31,8 +31,19 @@ describe('installHooks', () => {
     await rmDir(tmpProject);
   });
 
-  it('creates pre-commit and pre-push in .git/hooks/', async () => {
+  it('creates pre-commit only by default', async () => {
     await installHooks(tmpProject);
+
+    const preCommit = path.join(tmpProject, '.git', 'hooks', 'pre-commit');
+    const preCommitStat = await fs.stat(preCommit);
+    expect(preCommitStat.isFile()).toBe(true);
+
+    // Pre-push should NOT be installed by default
+    await expect(fs.stat(path.join(tmpProject, '.git', 'hooks', 'pre-push'))).rejects.toThrow();
+  });
+
+  it('creates pre-commit and pre-push with withPrePush option', async () => {
+    await installHooks(tmpProject, { withPrePush: true });
 
     const preCommit = path.join(tmpProject, '.git', 'hooks', 'pre-commit');
     const prePush = path.join(tmpProject, '.git', 'hooks', 'pre-push');
@@ -45,7 +56,7 @@ describe('installHooks', () => {
   });
 
   it('hook files contain SHIPSAFE_HOOK marker', async () => {
-    await installHooks(tmpProject);
+    await installHooks(tmpProject, { withPrePush: true });
 
     const preCommit = await fs.readFile(
       path.join(tmpProject, '.git', 'hooks', 'pre-commit'),
@@ -61,7 +72,7 @@ describe('installHooks', () => {
   });
 
   it('hook files have correct content', async () => {
-    await installHooks(tmpProject);
+    await installHooks(tmpProject, { withPrePush: true });
 
     const preCommit = await fs.readFile(
       path.join(tmpProject, '.git', 'hooks', 'pre-commit'),
@@ -77,7 +88,7 @@ describe('installHooks', () => {
   });
 
   it('hook files are executable (mode 755)', async () => {
-    await installHooks(tmpProject);
+    await installHooks(tmpProject, { withPrePush: true });
 
     const preCommitStat = await fs.stat(
       path.join(tmpProject, '.git', 'hooks', 'pre-commit'),

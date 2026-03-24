@@ -5,19 +5,71 @@ import type { Finding, AttackPath, BlastRadiusResult, MissingAuthResult } from '
 
 const ENTRY_POINT_PATTERNS = ['handle', 'route', 'controller', 'endpoint'];
 
-// Sinks must be specific enough to avoid matching common JS methods like Array.find()
-const SINK_PATTERNS: Record<string, string[]> = {
+// Receiver-aware sink patterns.
+// If `receivers` is specified, the method is only a sink when called on one of those receivers.
+// If `receivers` is omitted, any call to that method name is treated as a sink.
+interface SinkPattern {
+  method: string;
+  receivers?: string[];
+}
+
+const SINK_PATTERNS: Record<string, SinkPattern[]> = {
   database: [
-    // Must include receiver context — plain "find"/"delete" are too generic
-    'executeQuery', 'executeRaw', 'executeSql',
-    'queryRaw', 'queryRawUnsafe', '$queryRaw', '$queryRawUnsafe',
-    '$executeRaw', '$executeRawUnsafe',
-    'rawQuery', 'runQuery',
+    { method: 'query', receivers: ['db', 'pool', 'client', 'connection', 'knex', 'sequelize', 'prisma'] },
+    { method: 'execute', receivers: ['db', 'pool', 'client', 'connection', 'cursor', 'stmt'] },
+    { method: 'exec', receivers: ['db', 'connection'] },
+    { method: 'run', receivers: ['db', 'sqlite', 'better-sqlite'] },
+    { method: 'raw', receivers: ['knex', 'db'] },
+    { method: 'find', receivers: ['collection', 'model', 'db'] },
+    { method: 'findOne', receivers: ['collection', 'model', 'db'] },
+    { method: 'insert', receivers: ['collection', 'db', 'knex'] },
+    { method: 'update', receivers: ['collection', 'db', 'knex'] },
+    { method: 'delete', receivers: ['collection', 'db', 'knex'] },
+    // Always-dangerous patterns (no receiver needed — name is specific enough)
+    { method: 'executeQuery' },
+    { method: 'executeRaw' },
+    { method: 'executeSql' },
+    { method: 'queryRaw' },
+    { method: 'queryRawUnsafe' },
+    { method: '$queryRaw' },
+    { method: '$queryRawUnsafe' },
+    { method: '$executeRaw' },
+    { method: '$executeRawUnsafe' },
+    { method: 'rawQuery' },
+    { method: 'runQuery' },
   ],
-  filesystem: ['readFileSync', 'writeFileSync', 'readFile', 'writeFile', 'unlinkSync', 'createReadStream', 'createWriteStream'],
-  shell: ['execSync', 'execFileSync', 'spawnSync', 'childExec', 'childSpawn'],
-  network: ['fetchUrl', 'httpGet', 'httpPost', 'axiosGet', 'axiosPost'],
-  eval: ['eval', 'Function'],
+  filesystem: [
+    { method: 'readFile' },
+    { method: 'readFileSync' },
+    { method: 'writeFile' },
+    { method: 'writeFileSync' },
+    { method: 'createReadStream' },
+    { method: 'createWriteStream' },
+    { method: 'unlink' },
+    { method: 'unlinkSync' },
+  ],
+  shell: [
+    { method: 'exec', receivers: ['child_process', 'cp'] },
+    { method: 'execSync', receivers: ['child_process', 'cp'] },
+    { method: 'execSync' },  // also match bare execSync (imported directly)
+    { method: 'spawn', receivers: ['child_process', 'cp'] },
+    { method: 'execFile', receivers: ['child_process', 'cp'] },
+    { method: 'execFileSync' },
+    { method: 'spawnSync' },
+  ],
+  network: [
+    { method: 'fetch' },
+    { method: 'get', receivers: ['axios', 'http', 'https', 'got', 'request'] },
+    { method: 'post', receivers: ['axios', 'http', 'https', 'got', 'request'] },
+    { method: 'request', receivers: ['http', 'https'] },
+  ],
+  eval: [
+    { method: 'eval' },
+    { method: 'Function' },
+  ],
+  redirect: [
+    { method: 'redirect', receivers: ['res', 'response'] },
+  ],
 };
 
 const VALIDATOR_PATTERNS = ['valid', 'sanitiz', 'escape', 'clean', 'verify', 'auth', 'protect', 'guard', 'middleware'];
@@ -36,11 +88,26 @@ function isEntryPoint(fn: GraphFunction): boolean {
     /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(fn.name);
 }
 
-function classifySink(name: string): string | null {
+/**
+ * Classify a function call as a sink type, with optional receiver awareness.
+ * If receiver is provided, patterns with a `receivers` list will only match
+ * when the receiver is in that list. Patterns without `receivers` always match.
+ */
+function classifySink(name: string, receiver?: string): string | null {
   const nameLower = name.toLowerCase();
+  const receiverLower = receiver?.toLowerCase();
   for (const [type, patterns] of Object.entries(SINK_PATTERNS)) {
     for (const pattern of patterns) {
-      if (nameLower === pattern.toLowerCase()) {
+      if (nameLower === pattern.method.toLowerCase()) {
+        if (pattern.receivers) {
+          // Receiver-gated: only match if receiver is in the allowed list
+          if (receiverLower && pattern.receivers.some((r) => receiverLower === r.toLowerCase())) {
+            return type;
+          }
+          // No receiver or receiver not in list: skip this pattern (but continue checking others)
+          continue;
+        }
+        // No receiver restriction: always match
         return type;
       }
     }
@@ -53,8 +120,8 @@ function isValidator(name: string): boolean {
   return VALIDATOR_PATTERNS.some((p) => nameLower.includes(p));
 }
 
-function isSink(name: string): boolean {
-  return classifySink(name) !== null;
+function isSink(name: string, receiver?: string): boolean {
+  return classifySink(name, receiver) !== null;
 }
 
 function isHandlerLike(name: string): boolean {
@@ -66,7 +133,7 @@ function isHandlerLike(name: string): boolean {
 
 /**
  * Find paths from entry point functions to dangerous sink functions.
- * Uses BFS via getCallees to trace call chains without native path queries.
+ * Uses BFS via getCallEdgesFrom to trace call chains with receiver awareness.
  */
 export async function findAttackPaths(store: GraphStore): Promise<AttackPath[]> {
   // Step 1: Get all functions to identify entry points
@@ -80,13 +147,16 @@ export async function findAttackPaths(store: GraphStore): Promise<AttackPath[]> 
   for (const entry of entryPoints) {
     const entryName = entry.name;
 
-    // Get all direct callees (depth 1 only to build specific paths)
-    const directCallees = await store.getCallees(entryName, 1);
+    // Get direct call edges (with receiver info) from this entry point
+    const directEdges = store.getCallEdgesFrom(entryName);
 
-    for (const callee of directCallees) {
-      if (isSink(callee.name)) {
+    for (const edge of directEdges) {
+      const calleeFn = await store.getFunction(edge.calleeName);
+      if (!calleeFn) continue;
+
+      if (isSink(edge.calleeName, edge.receiver)) {
         // Direct path: entry -> sink
-        const pathNames = [entryName, callee.name];
+        const pathNames = [entryName, edge.calleeName];
         attackPaths.push({
           entryPoint: {
             name: entryName,
@@ -94,35 +164,59 @@ export async function findAttackPaths(store: GraphStore): Promise<AttackPath[]> 
             line: entry.startLine,
           },
           sink: {
-            name: callee.name,
-            filePath: callee.filePath,
-            line: callee.startLine,
-            type: classifySink(callee.name)!,
+            name: edge.calleeName,
+            filePath: calleeFn.filePath,
+            line: calleeFn.startLine,
+            type: classifySink(edge.calleeName, edge.receiver)!,
           },
           path: pathNames,
           hasValidation: pathNames.some((n) => isValidator(n)),
         });
       } else {
         // Check if this intermediate callee leads to a sink (depth 2-5)
-        const deepCallees = await store.getCallees(callee.name, 4);
-        for (const deepCallee of deepCallees) {
-          if (isSink(deepCallee.name)) {
-            const pathNames = [entryName, callee.name, deepCallee.name];
-            attackPaths.push({
-              entryPoint: {
-                name: entryName,
-                filePath: entry.filePath,
-                line: entry.startLine,
-              },
-              sink: {
-                name: deepCallee.name,
-                filePath: deepCallee.filePath,
-                line: deepCallee.startLine,
-                type: classifySink(deepCallee.name)!,
-              },
-              path: pathNames,
-              hasValidation: pathNames.some((n) => isValidator(n)),
-            });
+        // Use BFS with receiver awareness
+        const visited = new Set<string>([entryName, edge.calleeName]);
+        const queue: Array<{ name: string; pathSoFar: string[]; depth: number }> = [
+          { name: edge.calleeName, pathSoFar: [entryName, edge.calleeName], depth: 1 },
+        ];
+
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          if (current.depth >= 5) continue;
+
+          const innerEdges = store.getCallEdgesFrom(current.name);
+          for (const innerEdge of innerEdges) {
+            if (visited.has(innerEdge.calleeName)) continue;
+            visited.add(innerEdge.calleeName);
+
+            const innerCalleeFn = await store.getFunction(innerEdge.calleeName);
+            if (!innerCalleeFn) continue;
+
+            const newPath = [...current.pathSoFar, innerEdge.calleeName];
+
+            if (isSink(innerEdge.calleeName, innerEdge.receiver)) {
+              attackPaths.push({
+                entryPoint: {
+                  name: entryName,
+                  filePath: entry.filePath,
+                  line: entry.startLine,
+                },
+                sink: {
+                  name: innerEdge.calleeName,
+                  filePath: innerCalleeFn.filePath,
+                  line: innerCalleeFn.startLine,
+                  type: classifySink(innerEdge.calleeName, innerEdge.receiver)!,
+                },
+                path: newPath,
+                hasValidation: newPath.some((n) => isValidator(n)),
+              });
+            } else {
+              queue.push({
+                name: innerEdge.calleeName,
+                pathSoFar: newPath,
+                depth: current.depth + 1,
+              });
+            }
           }
         }
       }

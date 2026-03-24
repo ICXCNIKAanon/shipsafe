@@ -46,8 +46,20 @@ describe('classifySink', () => {
     expect(classifySink('executeQuery')).toBe('database');
   });
 
-  it('returns shell for exec', () => {
-    expect(classifySink('exec')).toBe('shell');
+  it('returns shell for exec with child_process receiver', () => {
+    expect(classifySink('exec', 'child_process')).toBe('shell');
+  });
+
+  it('returns database for exec with db receiver', () => {
+    expect(classifySink('exec', 'db')).toBe('database');
+  });
+
+  it('returns null for exec without receiver (ambiguous)', () => {
+    expect(classifySink('exec')).toBe(null);
+  });
+
+  it('returns shell for execSync (bare — no receiver needed)', () => {
+    expect(classifySink('execSync')).toBe('shell');
   });
 
   it('returns filesystem for writeFile', () => {
@@ -65,6 +77,22 @@ describe('classifySink', () => {
   it('returns null for unrelated names', () => {
     expect(classifySink('calculateTotal')).toBe(null);
     expect(classifySink('renderPage')).toBe(null);
+  });
+
+  it('returns database for query with db receiver', () => {
+    expect(classifySink('query', 'db')).toBe('database');
+  });
+
+  it('returns null for query without receiver (avoids Array.find false positive)', () => {
+    expect(classifySink('query')).toBe(null);
+  });
+
+  it('returns null for find without receiver', () => {
+    expect(classifySink('find')).toBe(null);
+  });
+
+  it('returns database for find with collection receiver', () => {
+    expect(classifySink('find', 'collection')).toBe('database');
   });
 });
 

@@ -17,6 +17,8 @@ npm install -g @shipsafe/cli
 
 That's it. One command installs the CLI, the MCP server for AI assistants, and auto-registers with Claude Code. Run `shipsafe init` inside any project to install git hooks and write AI instructions to your editor config files.
 
+ShipSafe is designed for active development — it catches issues as you write code, not after the fact. For existing codebases, run `shipsafe baseline` to snapshot current findings and only see new issues going forward.
+
 ## What it catches
 
 - **1,062 vulnerability patterns** -- SQL injection, prompt injection, XSS, command injection, path traversal, SSRF, CSRF, prototype pollution, insecure cryptography, insecure deserialization, authentication issues, and more

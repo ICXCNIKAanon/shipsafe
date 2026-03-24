@@ -30,7 +30,7 @@ ShipSafe protects your code through three layers:
 
 1. **Git hooks** (pre-commit and pre-push) -- installed automatically on first scan, they block commits and pushes that contain critical or high-severity findings. Works with any editor, any workflow.
 
-2. **MCP server** -- exposes 7 tools over stdio transport so AI coding assistants can scan, fix, and query your project's security posture in real time.
+2. **MCP server** -- exposes 8 tools over stdio transport so AI coding assistants can scan, fix, and query your project's security posture in real time.
 
 3. **CLI** -- direct commands for scanning, baselining known findings, checking packages before install, and managing configuration.
 
@@ -96,7 +96,7 @@ shipsafe config set licenseKey SS-PRO-abc123 --global
 
 ## MCP Tools
 
-ShipSafe exposes 7 tools through the [Model Context Protocol](https://modelcontextprotocol.io) for AI coding assistants:
+ShipSafe exposes 8 tools through the [Model Context Protocol](https://modelcontextprotocol.io) for AI coding assistants:
 
 | Tool | Description |
 |------|-------------|
@@ -178,7 +178,7 @@ src/
     pattern/             Scanner orchestration (Semgrep, Gitleaks, Trivy wrappers)
     graph/               Tree-sitter + KuzuDB knowledge graph
   cli/                   CLI commands (scan, init, activate, config, baseline, etc.)
-  mcp/                   MCP server + 7 tools (stdio transport)
+  mcp/                   MCP server + 8 tools (stdio transport)
   autofix/               Auto-fix engine (secret fixer, scaffolding, PR generation)
   github/                GitHub App (webhooks, PR scanner, checks API)
   hooks/                 Git hook installer (pre-commit, pre-push)

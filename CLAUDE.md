@@ -15,8 +15,8 @@ ShipSafe — full-lifecycle security + monitoring platform for vibe coders.
 ## Architecture
 - `bin/shipsafe.ts` — CLI entry point (Commander.js)
 - `src/engines/pattern/` — wraps Semgrep, Gitleaks, Trivy
-- `src/engines/graph/` — tree-sitter parsing + KuzuDB knowledge graph
-- `src/mcp/` — MCP server (stdio transport, 7 tools)
+- `src/engines/graph/` — tree-sitter parsing + in-memory knowledge graph
+- `src/mcp/` — MCP server (stdio transport, 8 tools)
 - `src/hooks/` — git hook scripts + installer
 - `src/claude-md/` — CLAUDE.md injection manager
 - `src/autofix/` — auto-fix PR generator, secret fixer, scaffolding

@@ -4,6 +4,8 @@ import type { ScanResult, ScanScope, Severity } from '../types.js';
 import { runPatternEngine, getAvailableScanners } from '../engines/pattern/index.js';
 import { isGraphEngineAvailable } from '../engines/graph/index.js';
 import { fixHardcodedSecret } from '../autofix/secret-fixer.js';
+import { fixSqlInjectionInFile } from '../autofix/sql-fixer.js';
+import { fixMissingHelmet, fixMissingRateLimit } from '../autofix/middleware-fixer.js';
 import { gateFeature } from './license-gate.js';
 import { checkLicense } from './license-check.js';
 import { checkHooksInstalled, installHooks } from '../hooks/installer.js';
@@ -122,10 +124,53 @@ export async function handleScanAction(options: ScanOptions): Promise<void> {
     if (!gate.allowed) {
       console.log(chalk.yellow(`\n${gate.reason}`));
     } else {
+      const sqlInjectionTypes = [
+        'SQL_INJECTION_CONCAT',
+        'SQL_INJECTION_TEMPLATE',
+        'SQL_INJECTION_INLINE_VAR',
+        'SQL_INJECTION_TEMPLATE_STRING',
+        'TEMPLATE_LITERAL_SQL_VARIABLE',
+      ];
       for (const finding of result.findings) {
         if (finding.type === 'hardcoded_secret' && finding.auto_fixable) {
           const fix = await fixHardcodedSecret(finding);
           console.log(chalk.green(`Fixed: moved ${fix.envVarName} to .env in ${finding.file}:${finding.line}`));
+        } else if (sqlInjectionTypes.includes(finding.type) && finding.auto_fixable) {
+          try {
+            const fix = await fixSqlInjectionInFile(finding);
+            console.log(chalk.green(`Fixed: converted SQL injection to parameterized query (${fix.paramStyle}) in ${finding.file}:${finding.line}`));
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.log(chalk.yellow(`Could not auto-fix SQL injection in ${finding.file}:${finding.line}: ${message}`));
+          }
+        } else if (finding.id === 'CONFIG_NO_SECURITY_HEADERS' && finding.auto_fixable) {
+          try {
+            const { readFile, writeFile } = await import('node:fs/promises');
+            const filePath = (await import('node:path')).resolve(process.cwd(), finding.file);
+            const content = await readFile(filePath, 'utf-8');
+            const result = fixMissingHelmet(content, finding);
+            if (result) {
+              await writeFile(filePath, result.fixed, 'utf-8');
+              console.log(chalk.green(`Fixed: ${result.description} in ${finding.file}`));
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.log(chalk.yellow(`Could not auto-fix missing helmet in ${finding.file}: ${message}`));
+          }
+        } else if (finding.id === 'RATE_LIMIT_AUTH_ENDPOINT' && finding.auto_fixable) {
+          try {
+            const { readFile, writeFile } = await import('node:fs/promises');
+            const filePath = (await import('node:path')).resolve(process.cwd(), finding.file);
+            const content = await readFile(filePath, 'utf-8');
+            const result = fixMissingRateLimit(content, finding);
+            if (result) {
+              await writeFile(filePath, result.fixed, 'utf-8');
+              console.log(chalk.green(`Fixed: ${result.description} in ${finding.file}`));
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.log(chalk.yellow(`Could not auto-fix missing rate limit in ${finding.file}: ${message}`));
+          }
         }
       }
     }

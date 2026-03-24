@@ -12,6 +12,7 @@ import { loadIgnoreFilter, type IgnoreFilter } from './ignore.js';
 import { loadGitIgnoreFilter } from './gitignore.js';
 import { getAstContext, clearAstCache, type AstContext } from './ast-context.js';
 import { extractImportContext, type ImportContext } from './import-context.js';
+import { detectFramework, type FrameworkProfile } from './framework-detect.js';
 
 // ── Project-aware allowlist for NEXT_PUBLIC_ suppression ────────────────────
 
@@ -118,6 +119,7 @@ interface LineContext {
   allLines: string[];
   isTestFile: boolean;
   importContext?: ImportContext;
+  frameworkProfile?: FrameworkProfile;
 }
 
 // ── Ignored directories and file patterns ──
@@ -541,7 +543,7 @@ const RULES: PatternRule[] = [
     severity: 'critical',
     fix_suggestion:
       'Use parameterized queries (e.g., query("SELECT * FROM users WHERE id = $1", [id])) instead of string concatenation.',
-    auto_fixable: false,
+    auto_fixable: true,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: false,
     skipTestFiles: true,
@@ -566,7 +568,7 @@ const RULES: PatternRule[] = [
     severity: 'critical',
     fix_suggestion:
       'Use parameterized queries or tagged template literals (e.g., sql`SELECT * FROM users WHERE id = ${id}`) that auto-escape values.',
-    auto_fixable: false,
+    auto_fixable: true,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: false,
     skipTestFiles: true,
@@ -589,7 +591,7 @@ const RULES: PatternRule[] = [
     severity: 'critical',
     fix_suggestion:
       'Use parameterized queries with placeholders (?, $1, :param) instead of string concatenation in SQL statements.',
-    auto_fixable: false,
+    auto_fixable: true,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: false,
     skipTestFiles: true,
@@ -616,7 +618,7 @@ const RULES: PatternRule[] = [
     severity: 'critical',
     fix_suggestion:
       'Use parameterized queries with placeholders instead of embedding variables directly in SQL template strings.',
-    auto_fixable: false,
+    auto_fixable: true,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: false,
     skipTestFiles: true,
@@ -1445,7 +1447,7 @@ const RULES: PatternRule[] = [
     severity: 'medium',
     fix_suggestion:
       'Add rate limiting middleware (e.g., express-rate-limit) to authentication endpoints to prevent brute force attacks.',
-    auto_fixable: false,
+    auto_fixable: true,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
@@ -1603,11 +1605,13 @@ const RULES: PatternRule[] = [
     severity: 'low',
     fix_suggestion:
       'Install and use helmet: app.use(helmet()) to set security-related HTTP headers.',
-    auto_fixable: false,
+    auto_fixable: true,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (_line, ctx) => {
+      // Skip for Next.js — headers are configured via next.config.js
+      if (ctx.frameworkProfile?.isNextJs) return false;
       // Suppress if the file imports helmet
       if (ctx.importContext?.hasHelmetImport) return false;
       // Only trigger once per file, on the line where express() is called
@@ -2422,6 +2426,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Skip for Next.js — Server Actions have built-in CSRF protection
+      if (ctx.frameworkProfile?.isNextJs) return false;
       // Suppress if the file imports a CSRF library
       if (ctx.importContext?.hasCSRFImport) return false;
       // Only fire on the first POST/PUT/DELETE route definition in the file
@@ -2637,6 +2643,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: false,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Only fire in Next.js projects
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isNextJs && ctx.frameworkProfile.name !== 'unknown') return false;
       // Check if we're in a getServerSideProps/getStaticProps function
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines
@@ -2665,6 +2673,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Only fire in Next.js projects
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isNextJs && ctx.frameworkProfile.name !== 'unknown') return false;
       // Suppress if the file imports an auth library
       if (ctx.importContext?.hasAuthImport) return false;
       // Match export default function handler pattern
@@ -5210,7 +5220,7 @@ const RULES: PatternRule[] = [
     severity: 'critical',
     fix_suggestion:
       'Use parameterized queries with placeholders ($1, ?, :param) instead of template literal interpolation in SQL strings.',
-    auto_fixable: false,
+    auto_fixable: true,
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: false,
     skipTestFiles: true,
@@ -6195,7 +6205,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.py'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Only fire in Django projects (or unknown)
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isDjango && ctx.frameworkProfile.name !== 'unknown') return false;
       return /\bALLOWED_HOSTS\s*=\s*\[.*['"`]\*['"`]/.test(line);
     },
   },
@@ -6212,6 +6224,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Only fire in Django projects (or unknown)
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isDjango && ctx.frameworkProfile.name !== 'unknown') return false;
       if (!/\bSECRET_KEY\s*=/.test(line)) return false;
       if (isFrameworkSource(ctx.filePath)) return false;
       // Hardcoded if assigned a string literal, not os.environ or config call
@@ -6246,7 +6260,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.py'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Only fire in Flask projects (or unknown)
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isFlask && ctx.frameworkProfile.name !== 'unknown') return false;
       return /\bapp\.run\s*\([^)]*\bdebug\s*=\s*True\b/.test(line);
     },
   },
@@ -6262,7 +6278,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.py'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Only fire in Flask projects (or unknown)
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isFlask && ctx.frameworkProfile.name !== 'unknown') return false;
       if (!/\bsecret_key\s*=/.test(line)) return false;
       return /\bsecret_key\s*=\s*['"`]/.test(line) && !/\bos\.environ\b/.test(line) && !/\bconfig\b/.test(line);
     },
@@ -6399,6 +6417,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Only fire in FastAPI projects (or unknown)
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isFastAPI && ctx.frameworkProfile.name !== 'unknown') return false;
       if (!hasFastapiImport(ctx.fileContent)) return false;
       if (!/\bCORSMiddleware\b/.test(line)) return false;
       const lineIdx = ctx.lineNumber - 1;
@@ -10773,6 +10793,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Only fire in Fastify projects (or unknown — fall through to per-file check)
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isFastify && ctx.frameworkProfile.name !== 'unknown') return false;
       if (!/\bfastify\s*\.\s*(?:post|put|patch)\s*\(/.test(line)) return false;
       const lineIdx = ctx.lineNumber - 1;
       const window = ctx.allLines.slice(lineIdx, Math.min(ctx.allLines.length, lineIdx + 8)).join('\n');
@@ -13913,7 +13935,9 @@ const RULES: PatternRule[] = [
     fileTypes: ['.ts', '.tsx', '.js', '.jsx'],
     skipCommentsAndStrings: true,
     skipTestFiles: true,
-    detect: (line) => {
+    detect: (line, ctx) => {
+      // Only fire in Fastify projects (or unknown — fall through to per-file check)
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isFastify && ctx.frameworkProfile.name !== 'unknown') return false;
       if (!/\bfastify\s*\(\s*\{/.test(line) && !/\bFastify\s*\(\s*\{/.test(line)) return false;
       return !/\bbodyLimit\s*:/.test(line);
     },
@@ -20153,6 +20177,8 @@ const RULES: PatternRule[] = [
     skipCommentsAndStrings: true,
     skipTestFiles: true,
     detect: (line, ctx) => {
+      // Only fire in Next.js projects
+      if (ctx.frameworkProfile && !ctx.frameworkProfile.isNextJs && ctx.frameworkProfile.name !== 'unknown') return false;
       // Suppress if the file imports an auth library
       if (ctx.importContext?.hasAuthImport) return false;
       if (!/['"]use server['"]/.test(ctx.fileContent)) return false;
@@ -20377,7 +20403,7 @@ function getFileType(filePath: string): FileType | null {
   return SCANNABLE_EXTENSIONS.has(ext) ? (ext as FileType) : null;
 }
 
-async function scanFileContent(filePath: string, content: string): Promise<Finding[]> {
+async function scanFileContent(filePath: string, content: string, frameworkProfile?: FrameworkProfile): Promise<Finding[]> {
   const findings: Finding[] = [];
 
   // Skip Prisma schema files (.prisma) — not application code
@@ -20410,6 +20436,7 @@ async function scanFileContent(filePath: string, content: string): Promise<Findi
     allLines: lines,
     isTestFile: fileIsTest,
     importContext: importCtx,
+    frameworkProfile,
   };
 
   // Track which rules have already flagged multi-line or file-level detections
@@ -20540,6 +20567,9 @@ export async function scanPatterns(
   // Build project-aware allowlist from package.json
   const allowlist = await buildPatternProjectAllowlist(targetPath);
 
+  // Detect framework ONCE before scanning files
+  const frameworkProfile = await detectFramework(targetPath);
+
   // Apply .shipsafeignore filter
   const ignoreFilter = await loadIgnoreFilter(resolve(targetPath));
 
@@ -20561,7 +20591,7 @@ export async function scanPatterns(
       batch.map(async (filePath) => {
         try {
           const content = await readFile(filePath, 'utf-8');
-          return await scanFileContent(filePath, content);
+          return await scanFileContent(filePath, content, frameworkProfile);
         } catch {
           // Skip files that can't be read (permissions, binary, etc.)
           return [];

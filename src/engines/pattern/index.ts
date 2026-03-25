@@ -244,8 +244,8 @@ export async function runPatternEngine(options: PatternEngineOptions): Promise<S
   );
   const status = hasCriticalOrHigh ? 'fail' : 'pass';
 
-  // 10. Return ScanResult with timing info
-  return {
+  // 10. Write scan cache for HUD integrations (claude-vitals, etc.)
+  const result: ScanResult = {
     status,
     score,
     findings: reportedFindings,
@@ -253,4 +253,29 @@ export async function runPatternEngine(options: PatternEngineOptions): Promise<S
     ...(newFindingsCount !== undefined && { new_findings_count: newFindingsCount }),
     ...(baselineSuppressedCount !== undefined && { baseline_suppressed_count: baselineSuppressedCount }),
   };
+
+  try {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const cacheDir = join(targetPath, '.shipsafe');
+    await mkdir(cacheDir, { recursive: true });
+    await writeFile(join(cacheDir, 'last-scan.json'), JSON.stringify({
+      score,
+      status,
+      findings_count: reportedFindings.length,
+      critical: reportedFindings.filter(f => f.severity === 'critical').length,
+      high: reportedFindings.filter(f => f.severity === 'high').length,
+      medium: reportedFindings.filter(f => f.severity === 'medium').length,
+      low: reportedFindings.filter(f => f.severity === 'low').length,
+      info: reportedFindings.filter(f => f.severity === 'info').length,
+      auto_fixable: reportedFindings.filter(f => f.auto_fixable).length,
+      scan_duration_ms: result.scan_duration_ms,
+      timestamp: new Date().toISOString(),
+      version: '1.4.0',
+    }, null, 2) + '\n', 'utf-8');
+  } catch {
+    // Cache write is best-effort — never block the scan
+  }
+
+  return result;
 }
